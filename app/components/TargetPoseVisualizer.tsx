@@ -1,11 +1,11 @@
 import { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useTimelineStore } from '@/app/lib/store';
+import { useInputStore, useTimelineStore } from '@/app/lib/stores';
 
 /**
- * Visualizes the TARGET cartesian pose that the user is controlling
- * This shows where we WANT the TCP to go, not where it currently is
+ * Visualizes the INPUT cartesian pose that the user is controlling via sliders
+ * This shows where the user wants the TCP to go (red/green/blue gizmo)
  * (IK will be computed later during playback to make the robot follow this target)
  * Only shown in cartesian mode - hidden in joint mode
  */
@@ -15,7 +15,7 @@ export default function TargetPoseVisualizer() {
   const yArrowRef = useRef<THREE.ArrowHelper | null>(null);
   const zArrowRef = useRef<THREE.ArrowHelper | null>(null);
 
-  const currentCartesianPose = useTimelineStore((state) => state.currentCartesianPose);
+  const inputCartesianPose = useInputStore((state) => state.inputCartesianPose);
   const motionMode = useTimelineStore((state) => state.timeline.mode);
 
   // Only show this gizmo in cartesian mode - it represents a cartesian target
@@ -73,30 +73,30 @@ export default function TargetPoseVisualizer() {
     };
   }, []);
 
-  // Update target position and orientation every frame
+  // Update input pose position and orientation every frame
   useFrame(() => {
     if (!groupRef.current) return;
 
-    // Show the TARGET cartesian pose using same coordinate convention as TargetTCPVisualizer
+    // Show the INPUT cartesian pose using same coordinate convention as TargetTCPVisualizer
     // Apply inverse transform: user space (X,Y,Z) → URDF world space (x,y,z)
     // User space: X=x, Y=-z, Z=y
     // Inverse: x=X, y=Z, z=-Y
     // Convert mm to meters and update position
     groupRef.current.position.set(
-      currentCartesianPose.X / 1000,   // x = X
-      currentCartesianPose.Z / 1000,   // y = Z (was Y)
-      -currentCartesianPose.Y / 1000   // z = -Y (was Z, negated)
+      inputCartesianPose.X / 1000,   // x = X
+      inputCartesianPose.Z / 1000,   // y = Z (was Y)
+      -inputCartesianPose.Y / 1000   // z = -Y (was Z, negated)
     );
 
-    // Update rotation from target orientation (convert degrees to radians)
+    // Update rotation from input orientation (convert degrees to radians)
     // Apply rotation transform to match coordinate system:
     // RX → rotation.x (around viewport X = user X)
     // RZ → rotation.y (around viewport Y = user Z)
     // -RY → rotation.z (around viewport Z = -user Y)
     groupRef.current.rotation.set(
-      (currentCartesianPose.RX * Math.PI) / 180,
-      (currentCartesianPose.RZ * Math.PI) / 180,
-      -(currentCartesianPose.RY * Math.PI) / 180
+      (inputCartesianPose.RX * Math.PI) / 180,
+      (inputCartesianPose.RZ * Math.PI) / 180,
+      -(inputCartesianPose.RY * Math.PI) / 180
     );
   });
 
