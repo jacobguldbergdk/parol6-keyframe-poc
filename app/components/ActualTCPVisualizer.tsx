@@ -1,17 +1,16 @@
 import { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useTimelineStore } from '@/app/lib/store';
+import { useHardwareStore, useRobotConfigStore } from '@/app/lib/stores';
 import { calculateTcpPoseFromUrdf, tcpPosesAreDifferent } from '@/app/lib/tcpCalculations';
 import type { CartesianPose } from '@/app/lib/types';
 
 /**
- * Visualizes the ACTUAL TCP position from actual robot (hardware feedback)
+ * Visualizes the HARDWARE TCP position from actual robot (hardware feedback)
  * This shows where the robot ACTUALLY IS (real hardware position)
  * Uses yellow/lime/purple color scheme
  *
- * Currently reads from actual robot at standby position
- * Future: Will sync with real robot hardware feedback
+ * Reads from actual robot hardware feedback via WebSocket
  *
  * IMPORTANT: Gets TCP position from ghost URDF L6 link's world transform
  */
@@ -24,9 +23,9 @@ export default function ActualTCPVisualizer() {
   // Track last sent position to avoid unnecessary setState calls
   const lastPositionRef = useRef<CartesianPose | null>(null);
 
-  const actualRobotRef = useTimelineStore((state) => state.actualRobotRef);
-  const tcpOffset = useTimelineStore((state) => state.tcpOffset);
-  const actualJointAngles = useTimelineStore((state) => state.actualJointAngles);
+  const hardwareRobotRef = useHardwareStore((state) => state.hardwareRobotRef);
+  const tcpOffset = useRobotConfigStore((state) => state.tcpOffset);
+  const hardwareJointAngles = useHardwareStore((state) => state.hardwareJointAngles);
 
   // Create arrows on mount with distinct styling
   useEffect(() => {
@@ -81,23 +80,23 @@ export default function ActualTCPVisualizer() {
     };
   }, []);
 
-  // Update actual TCP position every frame from ghost URDF robot model
+  // Update hardware TCP position every frame from ghost URDF robot model
   useFrame(() => {
-    if (!groupRef.current || !actualRobotRef) return;
+    if (!groupRef.current || !hardwareRobotRef) return;
 
-    // Only compute TCP position if we have actual hardware feedback
+    // Only compute TCP position if we have hardware feedback
     // Otherwise set to null to show N/A in UI
-    if (!actualJointAngles) {
-      useTimelineStore.setState({ actualTcpPosition: null });
+    if (!hardwareJointAngles) {
+      useHardwareStore.setState({ hardwareTcpPose: null });
       return;
     }
 
     // Calculate TCP pose using shared utility
-    const newPosition = calculateTcpPoseFromUrdf(actualRobotRef, tcpOffset);
+    const newPosition = calculateTcpPoseFromUrdf(hardwareRobotRef, tcpOffset);
     if (!newPosition) return;
 
     // Update visual arrow group position (for rendering)
-    const l6Link = actualRobotRef.links['L6'];
+    const l6Link = hardwareRobotRef.links['L6'];
     if (l6Link) {
       l6Link.updateMatrixWorld(true);
       const l6WorldPosition = new THREE.Vector3();
@@ -120,7 +119,7 @@ export default function ActualTCPVisualizer() {
     // Only update store if position changed significantly
     if (tcpPosesAreDifferent(newPosition, lastPositionRef.current)) {
       lastPositionRef.current = newPosition;
-      useTimelineStore.setState({ actualTcpPosition: newPosition });
+      useHardwareStore.setState({ hardwareTcpPose: newPosition });
     }
   });
 

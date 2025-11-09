@@ -2,12 +2,12 @@
 
 import { useEffect } from 'react';
 import { useRobotWebSocket } from '../hooks/useRobotWebSocket';
-import { useTimelineStore } from '../lib/store';
+import { useHardwareStore, useCommandStore } from '../lib/stores';
 import { useConfigStore } from '../lib/configStore';
 
 /**
  * WebSocketConnector - Invisible component that manages WebSocket connection
- * and syncs robot feedback data to the Zustand store.
+ * and syncs hardware feedback data to the Zustand stores.
  *
  * This component should be placed once at the root level of the control page.
  */
@@ -24,27 +24,29 @@ export default function WebSocketConnector() {
     logLevel: (config?.logging.level as any) || 'INFO',
   });
 
-  // Get store actions
-  const setConnectionStatus = useTimelineStore((state) => state.setConnectionStatus);
-  const setActualJointAngles = useTimelineStore((state) => state.setActualJointAngles);
-  const setActualCartesianPose = useTimelineStore((state) => state.setActualCartesianPose);
-  const setIOStatus = useTimelineStore((state) => state.setIOStatus);
-  const setGripperStatus = useTimelineStore((state) => state.setGripperStatus);
-  const setRobotStatus = useTimelineStore((state) => state.setRobotStatus);
-  const setJointHomed = useTimelineStore((state) => state.setJointHomed);
+  // Get store actions from hardware store (for actual robot feedback)
+  const setConnectionStatus = useHardwareStore((state) => state.setConnectionStatus);
+  const setHardwareJointAngles = useHardwareStore((state) => state.setHardwareJointAngles);
+  const setHardwareCartesianPose = useHardwareStore((state) => state.setHardwareCartesianPose);
+  const setIOStatus = useHardwareStore((state) => state.setIOStatus);
+  const setGripperStatus = useHardwareStore((state) => state.setGripperStatus);
+  const setRobotStatus = useHardwareStore((state) => state.setRobotStatus);
+
+  // Get homing action from command store (for visual coloring)
+  const setJointHomed = useCommandStore((state) => state.setJointHomed);
 
   // Update connection status when it changes
   useEffect(() => {
     setConnectionStatus(connectionState);
   }, [connectionState, setConnectionStatus]);
 
-  // Update robot data in store when it changes
+  // Update hardware feedback in store when it changes
   useEffect(() => {
-    // Update joint angles if available
+    // Update hardware joint angles if available
     if (robotData.joints?.angles) {
       const angles = robotData.joints.angles;
       // Convert array [J1, J2, J3, J4, J5, J6] to object
-      setActualJointAngles({
+      setHardwareJointAngles({
         J1: angles[0],
         J2: angles[1],
         J3: angles[2],
@@ -53,12 +55,12 @@ export default function WebSocketConnector() {
         J6: angles[5],
       });
     }
-  }, [robotData.joints, setActualJointAngles]);
+  }, [robotData.joints, setHardwareJointAngles]);
 
   useEffect(() => {
-    // Update cartesian pose if available
+    // Update hardware cartesian pose if available
     if (robotData.pose) {
-      setActualCartesianPose({
+      setHardwareCartesianPose({
         X: robotData.pose.x,
         Y: robotData.pose.y,
         Z: robotData.pose.z,
@@ -67,7 +69,7 @@ export default function WebSocketConnector() {
         RZ: robotData.pose.yaw,
       });
     }
-  }, [robotData.pose, setActualCartesianPose]);
+  }, [robotData.pose, setHardwareCartesianPose]);
 
   useEffect(() => {
     // Update I/O status if available

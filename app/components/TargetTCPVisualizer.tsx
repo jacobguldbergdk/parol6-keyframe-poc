@@ -1,12 +1,12 @@
 import { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useTimelineStore } from '@/app/lib/store';
+import { useCommandStore, useRobotConfigStore } from '@/app/lib/stores';
 import { calculateTcpPoseFromUrdf, tcpPosesAreDifferent } from '@/app/lib/tcpCalculations';
 import type { CartesianPose } from '@/app/lib/types';
 
 /**
- * Visualizes the TARGET TCP position extracted from target robot URDF model
+ * Visualizes the COMMANDED TCP position extracted from target robot URDF model
  * This shows where we're COMMANDING the robot to go (the main colored robot's TCP)
  * Uses orange/cyan/magenta color scheme
  *
@@ -22,8 +22,8 @@ export default function TargetTCPVisualizer() {
   // Track last sent position to avoid unnecessary setState calls
   const lastPositionRef = useRef<CartesianPose | null>(null);
 
-  const targetRobotRef = useTimelineStore((state) => state.targetRobotRef);
-  const tcpOffset = useTimelineStore((state) => state.tcpOffset);
+  const targetRobotRef = useCommandStore((state) => state.targetRobotRef);
+  const tcpOffset = useRobotConfigStore((state) => state.tcpOffset);
 
   // Create arrows on mount with distinct styling
   useEffect(() => {
@@ -110,7 +110,7 @@ export default function TargetTCPVisualizer() {
     // Only update store if position changed significantly
     if (tcpPosesAreDifferent(newPosition, lastPositionRef.current)) {
       lastPositionRef.current = newPosition;
-      useTimelineStore.setState({ targetTcpPosition: newPosition });
+      useCommandStore.setState({ commandedTcpPose: newPosition });
     }
   });
 
