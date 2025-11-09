@@ -1,10 +1,8 @@
 import { create } from 'zustand';
-import { TimelineStore, Keyframe, CartesianKeyframe, Timeline, PlaybackState, JointAngles, CartesianPose, JointName, CartesianAxis, MotionMode, IkAxisMask, OrientationDebugConfig } from './types';
-import { STANDBY_POSITION, DEFAULT_DURATION, JOINT_NAMES } from './constants';
+import { TimelineStore, Keyframe, CartesianKeyframe, Timeline, PlaybackState, JointAngles, CartesianPose, JointName, CartesianAxis, MotionMode, IkAxisMask, IOStatus, GripperStatus, RobotStatus, ConnectionStatus } from './types';
+import { DEFAULT_DURATION, JOINT_NAMES, CARTESIAN_AXES } from './constants';
+import { getHomePosition } from './positions';
 import { v4 as uuidv4 } from 'uuid';
-
-// Cartesian axis names
-const CARTESIAN_AXES: CartesianAxis[] = ['X', 'Y', 'Z', 'RX', 'RY', 'RZ'];
 
 export const useTimelineStore = create<TimelineStore>((set, get) => ({
   // Initial state
@@ -15,7 +13,7 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
     cartesianKeyframes: [],
     duration: DEFAULT_DURATION
   },
-  currentJointAngles: STANDBY_POSITION,
+  currentJointAngles: getHomePosition(),
   currentCartesianPose: {
     X: 0,
     Y: 0,
@@ -28,22 +26,79 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
     isPlaying: false,
     currentTime: 0,
     startTime: null,
-    loop: false
+    loop: false,
+    executeOnRobot: false  // Controls whether to send commands to actual robot during playback
   },
 
-  // URDF robot reference (set by URDFRobot component)
-  urdfRobotRef: null as any,
+  // URDF robot references (set by URDFRobot component)
+  targetRobotRef: null as any,  // Target colored robot (commanded/target position)
+  actualRobotRef: null as any, // Actual robot (hardware feedback/actual position)
 
   // TCP (Tool Center Point) offset from J6 reference frame (in millimeters)
   // User-adjustable to match different tools
   tcpOffset: { x: 47, y: 0, z: -62 } as { x: number; y: number; z: number },
 
   // IK axis mask - selectively enable/disable axes during IK solving
-  // Default: position-only (X, Y, Z enabled; RX, RY, RZ disabled)
-  ikAxisMask: { X: true, Y: true, Z: true, RX: false, RY: false, RZ: false } as IkAxisMask,
+  // Default: Full 6DoF (all axes enabled)
+  ikAxisMask: { X: true, Y: true, Z: true, RX: true, RY: true, RZ: true } as IkAxisMask,
 
-  // Actual TCP position from URDF (ground truth, updated every frame by ActualTCPVisualizer)
-  actualTcpPosition: null as { X: number; Y: number; Z: number } | null,
+  // Target TCP position from target robot URDF (commanded position, updated by TargetTCPVisualizer)
+  targetTcpPosition: null as { X: number; Y: number; Z: number; RX: number; RY: number; RZ: number } | null,
+
+  // Actual TCP position from actual robot URDF (hardware feedback, updated by ActualTCPVisualizer)
+  actualTcpPosition: null as { X: number; Y: number; Z: number; RX: number; RY: number; RZ: number } | null,
+
+  // Hardware feedback from WebSocket
+  actualJointAngles: null as JointAngles | null,
+  actualCartesianPose: null as CartesianPose | null,
+  ioStatus: null as IOStatus | null,
+  gripperStatus: null as GripperStatus | null,
+  robotStatus: null as RobotStatus | null,
+  connectionStatus: 'disconnected' as ConnectionStatus,
+
+  // UI state
+  selectedJoint: null as JointName | null,
+  setSelectedJoint: (joint) => set({ selectedJoint: joint }),
+  showActualRobot: true,
+  setShowActualRobot: (show) => set({ showActualRobot: show }),
+  showTargetRobot: true,
+  setShowTargetRobot: (show) => set({ showTargetRobot: show }),
+  stepAngle: 1.0, // Default step angle in degrees for keyboard and slider step buttons
+  setStepAngle: (angle) => set({ stepAngle: angle }),
+  jointHomedStatus: {
+    J1: false,
+    J2: false,
+    J3: false,
+    J4: false,
+    J5: false,
+    J6: false
+  },
+  setJointHomed: (joint, homed) => set((state) => ({
+    jointHomedStatus: {
+      ...state.jointHomedStatus,
+      [joint]: homed
+    }
+  })),
+
+  // Robot following modes (mutually exclusive)
+  targetFollowsActual: false, // Target robot mirrors actual robot (teaching mode)
+  actualFollowsTarget: false, // Send commands when target changes (live control mode)
+  setTargetFollowsActual: (follows) => set((state) => ({
+    targetFollowsActual: follows,
+    // Disable the other mode if enabling this one
+    actualFollowsTarget: follows ? false : state.actualFollowsTarget
+  })),
+  setActualFollowsTarget: (follows) => set((state) => ({
+    actualFollowsTarget: follows,
+    // Disable the other mode if enabling this one
+    targetFollowsActual: follows ? false : state.targetFollowsActual
+  })),
+
+  // Movement parameters (speed/accel from UI controls)
+  speed: 80, // Speed percentage (0-100)
+  accel: 60, // Acceleration percentage (0-100)
+  setSpeed: (speed) => set({ speed }),
+  setAccel: (accel) => set({ accel }),
 
   // Actions - Updated for keyframe model
   addKeyframe: (time, joint, value) => {
@@ -73,19 +128,6 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
   },
 
   updateKeyframe: (id, updates) => {
-    const state = get();
-    const oldKeyframe = state.timeline.keyframes.find(kf => kf.id === id);
-
-    console.log('💾 STORE updateKeyframe:', {
-      id,
-      updates,
-      oldKeyframe: oldKeyframe ? {
-        joint: oldKeyframe.joint,
-        time: oldKeyframe.time.toFixed(2) + 's',
-        value: oldKeyframe.value.toFixed(1) + '°'
-      } : 'NOT FOUND'
-    });
-
     set((state) => ({
       timeline: {
         ...state.timeline,
@@ -96,17 +138,6 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
           .sort((a, b) => a.time - b.time) // Re-sort if time was updated
       }
     }));
-
-    const newState = get();
-    const newKeyframe = newState.timeline.keyframes.find(kf => kf.id === id);
-    console.log('💾 STORE AFTER UPDATE:', {
-      id,
-      newKeyframe: newKeyframe ? {
-        joint: newKeyframe.joint,
-        time: newKeyframe.time.toFixed(2) + 's',
-        value: newKeyframe.value.toFixed(1) + '°'
-      } : 'NOT FOUND'
-    });
   },
 
   setCurrentTime: (time) => {
@@ -118,11 +149,12 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
     }));
   },
 
-  play: () => {
+  play: (executeOnRobot = false) => {
     set((state) => ({
       playbackState: {
         ...state.playbackState,
         isPlaying: true,
+        executeOnRobot,
         startTime: Date.now() - state.playbackState.currentTime * 1000
       }
     }));
@@ -163,7 +195,9 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
       currentJointAngles: {
         ...state.currentJointAngles,
         [joint]: angle
-      }
+      },
+      // Auto-enable target robot when slider is moved
+      showTargetRobot: true
     }));
   },
 
@@ -176,7 +210,6 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
       state.stop();
     }
 
-    console.log('🔄 MODE SWITCH:', { from: state.timeline.mode, to: mode });
 
     set((state) => ({
       timeline: {
@@ -223,19 +256,6 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
   },
 
   updateCartesianKeyframe: (id, updates) => {
-    const state = get();
-    const oldKeyframe = state.timeline.cartesianKeyframes.find(kf => kf.id === id);
-
-    console.log('💾 STORE updateCartesianKeyframe:', {
-      id,
-      updates,
-      oldKeyframe: oldKeyframe ? {
-        axis: oldKeyframe.axis,
-        time: oldKeyframe.time.toFixed(2) + 's',
-        value: oldKeyframe.value.toFixed(1)
-      } : 'NOT FOUND'
-    });
-
     set((state) => ({
       timeline: {
         ...state.timeline,
@@ -291,5 +311,34 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
         ...updates
       }
     }));
+  },
+
+  // Hardware feedback actions (from WebSocket)
+  setActualJointAngles: (angles) => {
+    set({ actualJointAngles: angles });
+  },
+
+  setActualCartesianPose: (pose) => {
+    set({ actualCartesianPose: pose });
+  },
+
+  setIOStatus: (status) => {
+    set({ ioStatus: status });
+  },
+
+  setGripperStatus: (status) => {
+    set({ gripperStatus: status });
+  },
+
+  setRobotStatus: (status) => {
+    set({ robotStatus: status });
+  },
+
+  setConnectionStatus: (status) => {
+    set({ connectionStatus: status });
   }
 }));
+
+// Note: Previously synced currentCartesianPose with targetTcpPosition
+// This is no longer needed - "Move to Target" buttons now use targetTcpPosition directly
+// currentCartesianPose is only for cartesian slider user input (shown via red gizmo)

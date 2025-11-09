@@ -9,14 +9,16 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CartesianAxis, IkAxisMask } from '@/app/lib/types';
 import { inverseKinematicsDetailed } from '@/app/lib/kinematics';
-import { AlertCircle, CheckCircle, Calculator } from 'lucide-react';
+import { solveIKBackend, IKResult } from '@/app/lib/api';
+import { AlertCircle, CheckCircle, Calculator, Network, Copy } from 'lucide-react';
 
 export default function CartesianSliders() {
   const currentCartesianPose = useTimelineStore((state) => state.currentCartesianPose);
   const currentJointAngles = useTimelineStore((state) => state.currentJointAngles);
   const setCartesianValue = useTimelineStore((state) => state.setCartesianValue);
   const tcpOffset = useTimelineStore((state) => state.tcpOffset);
-  const urdfRobotRef = useTimelineStore((state) => state.urdfRobotRef);
+  const targetRobotRef = useTimelineStore((state) => state.targetRobotRef);
+  const targetTcpPosition = useTimelineStore((state) => state.targetTcpPosition);
   const ikAxisMask = useTimelineStore((state) => state.ikAxisMask);
   const setIkAxisMask = useTimelineStore((state) => state.setIkAxisMask);
 
@@ -27,26 +29,37 @@ export default function CartesianSliders() {
     iterations?: number;
   }>({ type: 'idle' });
 
+  const [backendIkStatus, setBackendIkStatus] = useState<{
+    type: 'idle' | 'computing' | 'success' | 'error';
+    message?: string;
+    iterations?: number;
+  }>({ type: 'idle' });
+
+  // Store results for comparison
+  const [frontendResult, setFrontendResult] = useState<IKResult | null>(null);
+  const [backendResult, setBackendResult] = useState<IKResult | null>(null);
+
   // Track input field values separately to allow editing
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
 
   // Handle slider changes: ONLY update target pose, NO IK computation
   // IK will be computed later during timeline playback
   const handleSliderChange = (axis: CartesianAxis, value: number) => {
-    console.log(`💡 CARTESIAN SLIDER: User changed ${axis} to ${value.toFixed(1)}`);
     setCartesianValue(axis, value);
     // Clear IK status when user changes target
-    if (ikStatus.type !== 'idle') {
+    if (ikStatus.type !== 'idle' || backendIkStatus.type !== 'idle') {
       setIkStatus({ type: 'idle' });
+      setBackendIkStatus({ type: 'idle' });
+      setFrontendResult(null);
+      setBackendResult(null);
     }
   };
 
   // Compute IK on demand using numerical solver
   const handleComputeIK = () => {
-    console.log('🎯 Computing IK for target TCP pose:', currentCartesianPose);
     setIkStatus({ type: 'computing' });
 
-    if (!urdfRobotRef) {
+    if (!targetRobotRef) {
       setIkStatus({
         type: 'error',
         message: 'URDF robot model not loaded yet. Please wait...'
@@ -60,13 +73,12 @@ export default function CartesianSliders() {
       const ikResult = inverseKinematicsDetailed(
         currentCartesianPose,
         currentJointAngles,
-        urdfRobotRef,
+        targetRobotRef,
         tcpOffset,
         ikAxisMask
       );
 
       if (ikResult.success && ikResult.jointAngles) {
-        console.log('✅ IK success:', ikResult.jointAngles);
         // Update joint angles - robot will move to match target
         useTimelineStore.setState({ currentJointAngles: ikResult.jointAngles });
         setIkStatus({
@@ -74,16 +86,71 @@ export default function CartesianSliders() {
           message: `Converged in ${ikResult.iterations} iterations (error: ${ikResult.finalError?.toFixed(2)}mm)`,
           iterations: ikResult.iterations
         });
+        // Store result for comparison
+        setFrontendResult({
+          success: true,
+          joints: ikResult.jointAngles,
+          iterations: ikResult.iterations,
+          source: 'frontend'
+        });
       } else {
-        console.warn('❌ IK failed:', ikResult.error);
         setIkStatus({
           type: 'error',
           message: ikResult.error?.message || 'IK failed',
           distance: ikResult.error?.distance,
           iterations: ikResult.iterations
         });
+        setFrontendResult({
+          success: false,
+          error: ikResult.error?.message || 'IK failed',
+          iterations: ikResult.iterations,
+          source: 'frontend'
+        });
       }
     }, 50);
+  };
+
+  // Compute IK using backend solver
+  const handleComputeBackendIK = async () => {
+    setBackendIkStatus({ type: 'computing' });
+
+    try {
+      const result = await solveIKBackend(
+        currentCartesianPose,
+        currentJointAngles,
+        ikAxisMask,
+        targetRobotRef,  // Pass URDF reference for quaternion extraction
+        tcpOffset        // Pass TCP offset for consistency
+      );
+
+      setBackendResult(result);
+
+      if (result.success && result.joints) {
+        // Update joint angles - robot will move to match target
+        useTimelineStore.setState({ currentJointAngles: result.joints });
+        setBackendIkStatus({
+          type: 'success',
+          message: `Backend IK solved in ${result.iterations || '?'} iterations (residual: ${result.residual?.toFixed(4) || 'N/A'})`,
+          iterations: result.iterations
+        });
+      } else {
+        setBackendIkStatus({
+          type: 'error',
+          message: result.error || 'Backend IK failed',
+          iterations: result.iterations
+        });
+      }
+    } catch (error) {
+      setBackendIkStatus({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+      setBackendResult({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        source: 'backend'
+      });
+    }
   };
 
 
@@ -114,8 +181,11 @@ export default function CartesianSliders() {
     // Clear input value to revert to showing currentCartesianPose
     setInputValues({ ...inputValues, [axis]: '' });
     // Clear IK status when user changes target
-    if (ikStatus.type !== 'idle') {
+    if (ikStatus.type !== 'idle' || backendIkStatus.type !== 'idle') {
       setIkStatus({ type: 'idle' });
+      setBackendIkStatus({ type: 'idle' });
+      setFrontendResult(null);
+      setBackendResult(null);
     }
   };
 
@@ -123,6 +193,31 @@ export default function CartesianSliders() {
     if (e.key === 'Enter') {
       (e.target as HTMLInputElement).blur();
     }
+  };
+
+  // Sync cartesian sliders to match target robot's actual TCP position
+  const handleSyncToRobotTcp = () => {
+    if (!targetTcpPosition) {
+      return;
+    }
+
+    // Copy all 6 values from targetTcpPosition to currentCartesianPose
+    useTimelineStore.setState({
+      currentCartesianPose: {
+        X: targetTcpPosition.X,
+        Y: targetTcpPosition.Y,
+        Z: targetTcpPosition.Z,
+        RX: targetTcpPosition.RX,
+        RY: targetTcpPosition.RY,
+        RZ: targetTcpPosition.RZ
+      }
+    });
+
+    // Clear IK status since we're resetting to a known position
+    setIkStatus({ type: 'idle' });
+    setBackendIkStatus({ type: 'idle' });
+    setFrontendResult(null);
+    setBackendResult(null);
   };
 
   return (
@@ -191,8 +286,25 @@ export default function CartesianSliders() {
         </div>
       </div>
 
-      {/* Compute IK Button */}
+      {/* Sync to Robot Button */}
       <div className="mt-4">
+        <Button
+          onClick={handleSyncToRobotTcp}
+          disabled={!targetTcpPosition}
+          className="w-full"
+          variant="outline"
+          size="sm"
+        >
+          <Copy className="w-4 h-4 mr-2" />
+          Copy From Robot TCP
+        </Button>
+        <div className="mt-1 text-xs text-muted-foreground italic text-center">
+          Sync sliders to target robot's actual position
+        </div>
+      </div>
+
+      {/* Compute IK Buttons */}
+      <div className="mt-4 grid grid-cols-2 gap-2">
         <Button
           onClick={handleComputeIK}
           disabled={ikStatus.type === 'computing'}
@@ -200,7 +312,16 @@ export default function CartesianSliders() {
           variant="default"
         >
           <Calculator className="w-4 h-4 mr-2" />
-          {ikStatus.type === 'computing' ? 'Computing IK...' : 'Compute IK'}
+          {ikStatus.type === 'computing' ? 'Computing...' : 'IK (Frontend)'}
+        </Button>
+        <Button
+          onClick={handleComputeBackendIK}
+          disabled={backendIkStatus.type === 'computing'}
+          className="w-full"
+          variant="outline"
+        >
+          <Network className="w-4 h-4 mr-2" />
+          {backendIkStatus.type === 'computing' ? 'Computing...' : 'IK (Backend)'}
         </Button>
       </div>
 
@@ -219,7 +340,7 @@ export default function CartesianSliders() {
         <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
           <div className="text-xs">
-            <div className="font-semibold text-red-500 mb-1">IK Failed</div>
+            <div className="font-semibold text-red-500 mb-1">Frontend IK Failed</div>
             <div className="text-red-400">{ikStatus.message}</div>
             {ikStatus.iterations && (
               <div className="text-red-400/70 mt-1">
@@ -230,23 +351,83 @@ export default function CartesianSliders() {
         </div>
       )}
 
-      {/* Current Joint Angles Display (read-only) */}
-      <div className="mt-6 pt-4 border-t">
-        <h4 className="text-xs font-semibold mb-2 text-muted-foreground">Current Joint Angles (Robot Position)</h4>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-          {['J1', 'J2', 'J3', 'J4', 'J5', 'J6'].map((joint) => (
-            <div key={joint} className="flex justify-between text-xs">
-              <span className="text-muted-foreground">{joint}:</span>
-              <span className="font-mono">
-                {currentJointAngles[joint as keyof typeof currentJointAngles].toFixed(1)}°
-              </span>
+      {/* Backend IK Status Feedback */}
+      {backendIkStatus.type === 'success' && (
+        <div className="bg-blue-500/10 border border-blue-500/50 rounded-lg p-3 flex items-start gap-2">
+          <CheckCircle className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+          <div className="text-xs text-blue-400">
+            <div className="font-semibold mb-1">Backend IK Success!</div>
+            <div>{backendIkStatus.message}</div>
+          </div>
+        </div>
+      )}
+
+      {backendIkStatus.type === 'error' && (
+        <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+          <div className="text-xs">
+            <div className="font-semibold text-red-500 mb-1">Backend IK Failed</div>
+            <div className="text-red-400">{backendIkStatus.message}</div>
+            {backendIkStatus.iterations && (
+              <div className="text-red-400/70 mt-1">
+                Iterations: {backendIkStatus.iterations}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Comparison View */}
+      {frontendResult && backendResult && frontendResult.success && backendResult.success && (
+        <div className="mt-4 pt-4 border-t">
+          <h4 className="text-xs font-semibold mb-3 text-muted-foreground">IK Comparison</h4>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="font-semibold text-muted-foreground">Joint</div>
+            <div className="font-semibold text-green-500 text-center">Frontend</div>
+            <div className="font-semibold text-blue-500 text-center">Backend</div>
+
+            {['J1', 'J2', 'J3', 'J4', 'J5', 'J6'].map((joint) => {
+              const frontendVal = frontendResult.joints?.[joint as keyof typeof frontendResult.joints] || 0;
+              const backendVal = backendResult.joints?.[joint as keyof typeof backendResult.joints] || 0;
+              const diff = Math.abs(frontendVal - backendVal);
+              const isSignificant = diff > 5; // More than 5 degrees difference
+
+              return (
+                <div key={joint} className="contents">
+                  <div className="text-muted-foreground">{joint}:</div>
+                  <div className="font-mono text-center">{frontendVal.toFixed(1)}°</div>
+                  <div className="font-mono text-center">{backendVal.toFixed(1)}°</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 space-y-1">
+            <div className="text-xs text-muted-foreground">
+              <span className="font-semibold">Max Difference:</span>{' '}
+              {Math.max(
+                ...['J1', 'J2', 'J3', 'J4', 'J5', 'J6'].map((joint) => {
+                  const frontendVal = frontendResult.joints?.[joint as keyof typeof frontendResult.joints] || 0;
+                  const backendVal = backendResult.joints?.[joint as keyof typeof backendResult.joints] || 0;
+                  return Math.abs(frontendVal - backendVal);
+                })
+              ).toFixed(2)}°
             </div>
-          ))}
+            {Math.max(
+              ...['J1', 'J2', 'J3', 'J4', 'J5', 'J6'].map((joint) => {
+                const frontendVal = frontendResult.joints?.[joint as keyof typeof frontendResult.joints] || 0;
+                const backendVal = backendResult.joints?.[joint as keyof typeof backendResult.joints] || 0;
+                return Math.abs(frontendVal - backendVal);
+              })
+            ) > 5 && (
+              <div className="text-xs text-amber-500 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                <span>Significant difference detected (>5°)</span>
+              </div>
+            )}
+          </div>
         </div>
-        <div className="mt-2 text-xs text-muted-foreground italic">
-          Use "Compute IK" button to move robot to target position
-        </div>
-      </div>
+      )}
     </div>
   );
 }

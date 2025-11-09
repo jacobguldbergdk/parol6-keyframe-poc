@@ -1,5 +1,6 @@
 import { Keyframe, JointAngles, JointName, CartesianKeyframe, CartesianPose, CartesianAxis } from './types';
-import { JOINT_NAMES, STANDBY_POSITION, CARTESIAN_AXES } from './constants';
+import { JOINT_NAMES, CARTESIAN_AXES } from './constants';
+import { getHomePosition } from './positions';
 
 /**
  * Linear interpolation between two values
@@ -21,9 +22,9 @@ function getJointValueAtTime(
     .filter(kf => kf.joint === joint)
     .sort((a, b) => a.time - b.time);
 
-  // If no keyframes for this joint, return standby position
+  // If no keyframes for this joint, return home position
   if (jointKeyframes.length === 0) {
-    return STANDBY_POSITION[joint];
+    return getHomePosition()[joint];
   }
 
   // If before first keyframe, return first keyframe value

@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* React Contexify styles */
+@import 'react-contexify/dist/ReactContexify.css';
+
 
 
 @layer base {

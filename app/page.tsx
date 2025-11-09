@@ -1,13 +1,17 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+import Header from './components/Header';
 import RobotViewer from './components/RobotViewer';
 import Timeline from './components/Timeline';
 import JointSliders from './components/JointSliders';
 import CartesianSliders from './components/CartesianSliders';
-import TCPOffsetControls from './components/TCPOffsetControls';
+import ControlOptions from './components/ControlOptions';
 import { usePlayback } from './hooks/usePlayback';
 import { useScrubbing } from './hooks/useScrubbing';
+import { useActualFollowsTarget } from './hooks/useActualFollowsTarget';
 import { useTimelineStore } from './lib/store';
+import { useConfigStore } from './lib/configStore';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -21,10 +25,60 @@ export default function Home() {
   // Initialize scrubbing (robot follows playhead when not playing)
   useScrubbing();
 
+  // Enable live control mode - automatically sends move commands when target changes
+  useActualFollowsTarget();
+
   const exportTimeline = useTimelineStore((state) => state.exportTimeline);
   const loadTimeline = useTimelineStore((state) => state.loadTimeline);
   const motionMode = useTimelineStore((state) => state.timeline.mode);
   const setMotionMode = useTimelineStore((state) => state.setMotionMode);
+  const setTcpOffset = useTimelineStore((state) => state.setTcpOffset);
+  const targetTcpPosition = useTimelineStore((state) => state.targetTcpPosition);
+
+  // Track if we've synced the RGB gizmo for current cartesian session
+  const hasSyncedRef = useRef(false);
+
+  const { config, fetchConfig } = useConfigStore();
+
+  // Initialize TCP offset from config.yaml on mount
+  useEffect(() => {
+    const initializeConfig = async () => {
+      await fetchConfig();
+    };
+    initializeConfig();
+  }, [fetchConfig]);
+
+  // Sync tcp_offset from config to timelineStore when config loads
+  useEffect(() => {
+    if (config?.ui?.tcp_offset) {
+      setTcpOffset('x', config.ui.tcp_offset.x);
+      setTcpOffset('y', config.ui.tcp_offset.y);
+      setTcpOffset('z', config.ui.tcp_offset.z);
+    }
+  }, [config, setTcpOffset]);
+
+  // Auto-sync cartesian pose to robot TCP when switching to cartesian mode
+  // Only runs ONCE per cartesian session to prevent feedback loop
+  useEffect(() => {
+    if (motionMode === 'cartesian' && targetTcpPosition && !hasSyncedRef.current) {
+      useTimelineStore.setState({
+        currentCartesianPose: {
+          X: targetTcpPosition.X,
+          Y: targetTcpPosition.Y,
+          Z: targetTcpPosition.Z,
+          RX: targetTcpPosition.RX,
+          RY: targetTcpPosition.RY,
+          RZ: targetTcpPosition.RZ
+        }
+      });
+      hasSyncedRef.current = true;
+    }
+
+    // Reset sync flag when leaving cartesian mode
+    if (motionMode !== 'cartesian') {
+      hasSyncedRef.current = false;
+    }
+  }, [motionMode, targetTcpPosition]);
 
   const handleModeChange = (value: string) => {
     const newMode = value as MotionMode;
@@ -57,7 +111,6 @@ export default function Home() {
         const timeline = JSON.parse(event.target?.result as string);
         loadTimeline(timeline);
       } catch (error) {
-        console.error('Failed to load timeline:', error);
         alert('Failed to load timeline file. Please check the file format.');
       }
     };
@@ -67,9 +120,11 @@ export default function Home() {
   return (
     <main className="h-screen flex flex-col bg-background">
       {/* Header */}
-      <header className="border-b px-6 py-3 flex items-center justify-between">
+      <Header />
+
+      <div className="border-b px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-6">
-          <h1 className="text-2xl font-bold">🤖 PAROL6 Timeline Editor v2.0</h1>
+          <h2 className="text-lg font-semibold">Timeline Editor</h2>
           <ToggleGroup type="single" value={motionMode} onValueChange={handleModeChange}>
             <ToggleGroupItem value="joint">Joint Space</ToggleGroupItem>
             <ToggleGroupItem value="cartesian">Cartesian Space</ToggleGroupItem>
@@ -93,7 +148,7 @@ export default function Home() {
             </label>
           </Button>
         </div>
-      </header>
+      </div>
 
       {/* Main Content: 80% 3D View / 20% Controls */}
       <div className="flex-1 flex min-h-0">
@@ -103,17 +158,15 @@ export default function Home() {
         </div>
 
         {/* Controls Panel - 20% */}
-        <div className="w-80 border-l p-4 overflow-y-auto flex-shrink-0">
-          <Card className="p-4 mb-4">
+        <div className="w-80 border-l p-4 overflow-y-auto flex-shrink-0 space-y-4">
+          <Card className="p-4">
             <h3 className="font-semibold mb-3">
               {motionMode === 'joint' ? 'Joint Angles' : 'Cartesian Position'}
             </h3>
             {motionMode === 'joint' ? <JointSliders /> : <CartesianSliders />}
           </Card>
 
-          <Card className="p-4">
-            <TCPOffsetControls />
-          </Card>
+          <ControlOptions />
         </div>
       </div>
 

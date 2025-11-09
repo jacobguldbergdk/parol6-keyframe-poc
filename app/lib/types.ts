@@ -37,6 +37,43 @@ export interface IkAxisMask {
   RZ: boolean;  // Solve for RZ rotation
 }
 
+// Hardware feedback types (from WebSocket)
+
+// I/O Status from robot hardware
+export interface IOStatus {
+  input_1: boolean;
+  input_2: boolean;
+  output_1: boolean;
+  output_2: boolean;
+  estop_pressed: boolean;
+  timestamp: string;
+}
+
+// Gripper status from robot hardware
+export interface GripperStatus {
+  device_id: number;
+  position: number;        // 0-255
+  speed: number;
+  current: number;
+  status_byte: number;
+  object_detected: number; // 0=none, 1=closing, 2=opening
+  is_calibrated: boolean;
+  is_active: boolean;
+  is_moving: boolean;
+  timestamp: string;
+}
+
+// Overall robot status
+export interface RobotStatus {
+  is_stopped: boolean | null;
+  estop_active: boolean | null;
+  homed: boolean[] | null;  // Homing status for all 6 joints [J1, J2, J3, J4, J5, J6]
+  timestamp: string;
+}
+
+// WebSocket connection status
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
 // Joint keyframe = one joint value at one time (independent per joint)
 export interface Keyframe {
   id: string;
@@ -71,6 +108,7 @@ export interface PlaybackState {
   currentTime: number;
   startTime: number | null;
   loop: boolean;
+  executeOnRobot: boolean;  // Whether to send commands to actual robot during playback
 }
 
 // Joint limits (from PAROL6_ROBOT.py)
@@ -88,8 +126,43 @@ export interface TimelineStore {
   playbackState: PlaybackState;
   ikAxisMask: IkAxisMask;
 
-  // Actual TCP pose from URDF (ground truth, updated by ActualTCPVisualizer)
+  // Target TCP pose from target robot URDF (commanded position, updated by TargetTCPVisualizer)
+  targetTcpPosition: { X: number; Y: number; Z: number; RX: number; RY: number; RZ: number } | null;
+
+  // Actual TCP pose from actual robot URDF (hardware feedback, updated by ActualTCPVisualizer)
   actualTcpPosition: { X: number; Y: number; Z: number; RX: number; RY: number; RZ: number } | null;
+
+  // Hardware feedback from WebSocket
+  actualJointAngles: JointAngles | null;
+  actualCartesianPose: CartesianPose | null;
+  ioStatus: IOStatus | null;
+  gripperStatus: GripperStatus | null;
+  robotStatus: RobotStatus | null;
+  connectionStatus: ConnectionStatus;
+
+  // UI state
+  selectedJoint: JointName | null;
+  setSelectedJoint: (joint: JointName | null) => void;
+  showActualRobot: boolean;
+  setShowActualRobot: (show: boolean) => void;
+  showTargetRobot: boolean;
+  setShowTargetRobot: (show: boolean) => void;
+  stepAngle: number; // Step angle in degrees for keyboard and slider step buttons
+  setStepAngle: (angle: number) => void;
+  jointHomedStatus: Record<JointName, boolean>;
+  setJointHomed: (joint: JointName, homed: boolean) => void;
+
+  // Robot following modes (mutually exclusive)
+  targetFollowsActual: boolean; // Target robot mirrors actual robot (teaching mode)
+  actualFollowsTarget: boolean; // Send commands when target changes (live control mode)
+  setTargetFollowsActual: (follows: boolean) => void;
+  setActualFollowsTarget: (follows: boolean) => void;
+
+  // Movement parameters (speed/accel from UI controls)
+  speed: number; // Speed percentage (0-100)
+  accel: number; // Acceleration percentage (0-100)
+  setSpeed: (speed: number) => void;
+  setAccel: (accel: number) => void;
 
   // Motion mode actions
   setMotionMode: (mode: MotionMode) => void;
@@ -110,7 +183,7 @@ export interface TimelineStore {
 
   // Playback actions
   setCurrentTime: (time: number) => void;
-  play: () => void;
+  play: (executeOnRobot?: boolean) => void;
   pause: () => void;
   stop: () => void;
 
@@ -120,4 +193,12 @@ export interface TimelineStore {
 
   // IK axis mask
   setIkAxisMask: (updates: Partial<IkAxisMask>) => void;
+
+  // Hardware feedback actions (from WebSocket)
+  setActualJointAngles: (angles: JointAngles | null) => void;
+  setActualCartesianPose: (pose: CartesianPose | null) => void;
+  setIOStatus: (status: IOStatus | null) => void;
+  setGripperStatus: (status: GripperStatus | null) => void;
+  setRobotStatus: (status: RobotStatus | null) => void;
+  setConnectionStatus: (status: ConnectionStatus) => void;
 }

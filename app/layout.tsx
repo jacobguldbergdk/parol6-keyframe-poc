@@ -1,10 +1,7 @@
-import type { Metadata } from "next";
-import "./globals.css";
+'use client';
 
-export const metadata: Metadata = {
-  title: "PAROL6 Timeline Editor",
-  description: "Timeline-based waypoint editor for PAROL6 robot",
-};
+import "./globals.css";
+import WebSocketConnector from './components/WebSocketConnector';
 
 export default function RootLayout({
   children,
@@ -14,9 +11,12 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
+        <title>PAROL6 Control</title>
         <link href="https://fonts.googleapis.com/icon?family=Material+Icons&display=block" rel="stylesheet" />
       </head>
       <body className="antialiased">
+        {/* Global WebSocket connection - updates Zustand store on all pages */}
+        <WebSocketConnector />
         {children}
       </body>
     </html>

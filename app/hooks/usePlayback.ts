@@ -1,14 +1,16 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTimelineStore } from '@/app/lib/store';
 import { getJointAnglesAtTime, getCartesianPoseAtTime } from '@/app/lib/interpolation';
 import { inverseKinematicsDetailed } from '@/app/lib/kinematics';
 import { DEFAULT_FPS } from '@/app/lib/constants';
+import { moveJoints } from '@/app/lib/api';
 
 /**
  * Playback loop hook - runs at 60fps when playing
  */
 export function usePlayback() {
   const isPlaying = useTimelineStore((state) => state.playbackState.isPlaying);
+  const executeOnRobot = useTimelineStore((state) => state.playbackState.executeOnRobot);
   const currentTime = useTimelineStore ((state) => state.playbackState.currentTime);
   const startTime = useTimelineStore((state) => state.playbackState.startTime);
   const duration = useTimelineStore((state) => state.timeline.duration);
@@ -16,34 +18,20 @@ export function usePlayback() {
   const keyframes = useTimelineStore((state) => state.timeline.keyframes);
   const cartesianKeyframes = useTimelineStore((state) => state.timeline.cartesianKeyframes);
   const currentJointAngles = useTimelineStore((state) => state.currentJointAngles);
-  const urdfRobotRef = useTimelineStore((state) => state.urdfRobotRef);
+  const targetRobotRef = useTimelineStore((state) => state.targetRobotRef);
   const tcpOffset = useTimelineStore((state) => state.tcpOffset);
   const ikAxisMask = useTimelineStore((state) => state.ikAxisMask);
   const setCurrentTime = useTimelineStore((state) => state.setCurrentTime);
   const stop = useTimelineStore((state) => state.stop);
 
+  // Track last time for keyframe crossing detection
+  const lastTime = useRef(0);
+
   useEffect(() => {
     if (!isPlaying || startTime === null) return;
 
-    if (motionMode === 'joint') {
-      console.log('▶️  PLAYBACK STARTED (Joint mode) with keyframes:', {
-        totalKeyframes: keyframes.length,
-        keyframesByJoint: keyframes.reduce((acc, kf) => {
-          if (!acc[kf.joint]) acc[kf.joint] = [];
-          acc[kf.joint].push(`${kf.time.toFixed(2)}s`);
-          return acc;
-        }, {} as Record<string, string[]>)
-      });
-    } else {
-      console.log('▶️  PLAYBACK STARTED (Cartesian mode) with keyframes:', {
-        totalKeyframes: cartesianKeyframes.length,
-        keyframesByAxis: cartesianKeyframes.reduce((acc, kf) => {
-          if (!acc[kf.axis]) acc[kf.axis] = [];
-          acc[kf.axis].push(`${kf.time.toFixed(2)}s`);
-          return acc;
-        }, {} as Record<string, string[]>)
-      });
-    }
+    // Reset lastTime when playback starts
+    lastTime.current = 0;
 
     const interval = setInterval(() => {
       const elapsed = (Date.now() - startTime) / 1000; // Convert to seconds
@@ -55,33 +43,50 @@ export function usePlayback() {
 
       setCurrentTime(elapsed);
 
+      // Keyframe crossing detection (only in joint mode for now)
+      if (motionMode === 'joint' && executeOnRobot) {
+        // Find all unique keyframe times crossed since last frame
+        const uniqueTimes = new Set<number>();
+        keyframes.forEach(kf => {
+          if (kf.time >= lastTime.current && kf.time <= elapsed) {
+            uniqueTimes.add(kf.time);
+          }
+        });
+
+        // Process each crossed keyframe time
+        const sortedTimes = Array.from(uniqueTimes).sort((a, b) => a - b);
+        sortedTimes.forEach(time => {
+          // Find next keyframe time after this one
+          const allKeyframeTimes = [...new Set(keyframes.map(kf => kf.time))];
+          const futureKeyframeTimes = allKeyframeTimes.filter(t => t > time);
+          const nextKeyframeTime = futureKeyframeTimes.length > 0
+            ? Math.min(...futureKeyframeTimes)
+            : null;
+
+          if (nextKeyframeTime !== null) {
+            // Get joint angles at the NEXT keyframe (not the current one)
+            const nextKeyframeAngles = getJointAnglesAtTime(keyframes, nextKeyframeTime);
+            const commandDuration = nextKeyframeTime - time;
+
+            // Send move command to NEXT keyframe with duration
+            moveJoints(nextKeyframeAngles, undefined, commandDuration).catch(error => {
+              console.error('[Playback] Failed to send move command:', error);
+            });
+          }
+        });
+      }
+
+      // Update lastTime for next frame
+      lastTime.current = elapsed;
+
       if (motionMode === 'joint') {
         // Joint mode: Interpolate joint angles directly
         const interpolatedAngles = getJointAnglesAtTime(keyframes, elapsed);
-
-        // Log interpolation every second (to avoid spam)
-        if (Math.floor(elapsed * 10) % 10 === 0) {
-          console.log('🎬 INTERPOLATING (Joint) at', elapsed.toFixed(2) + 's:', {
-            keyframesUsed: keyframes.length,
-            angles: Object.entries(interpolatedAngles).map(([joint, angle]) =>
-              `${joint}: ${angle.toFixed(1)}°`
-            ).join(', ')
-          });
-        }
 
         useTimelineStore.setState({ currentJointAngles: interpolatedAngles });
       } else {
         // Cartesian mode: Interpolate pose, then compute IK
         const interpolatedPose = getCartesianPoseAtTime(cartesianKeyframes, elapsed);
-
-        // Log interpolation every second (to avoid spam)
-        if (Math.floor(elapsed * 10) % 10 === 0) {
-          console.log('🎬 INTERPOLATING (Cartesian) at', elapsed.toFixed(2) + 's:', {
-            keyframesUsed: cartesianKeyframes.length,
-            position: `X:${interpolatedPose.X.toFixed(1)} Y:${interpolatedPose.Y.toFixed(1)} Z:${interpolatedPose.Z.toFixed(1)}`,
-            orientation: `RX:${interpolatedPose.RX.toFixed(1)}° RY:${interpolatedPose.RY.toFixed(1)}° RZ:${interpolatedPose.RZ.toFixed(1)}°`
-          });
-        }
 
         // Update cartesian pose for target visualizer
         useTimelineStore.setState({
@@ -89,11 +94,11 @@ export function usePlayback() {
         });
 
         // Compute IK to update robot position (same as manual button)
-        if (urdfRobotRef) {
+        if (targetRobotRef) {
           const ikResult = inverseKinematicsDetailed(
             interpolatedPose,
             currentJointAngles,
-            urdfRobotRef,
+            targetRobotRef,
             tcpOffset,
             ikAxisMask
           );
@@ -101,25 +106,14 @@ export function usePlayback() {
           if (ikResult.success && ikResult.jointAngles) {
             // IK succeeded - update robot joint angles
             useTimelineStore.setState({ currentJointAngles: ikResult.jointAngles });
-          } else {
-            // IK failed - log warning but continue playback with last valid position
-            if (Math.floor(elapsed * 10) % 10 === 0) {
-              console.warn('⚠️  PLAYBACK (Cartesian): IK failed at', elapsed.toFixed(2) + 's:', ikResult.error?.message);
-            }
-          }
-        } else {
-          // URDF not loaded yet - log once
-          if (Math.floor(elapsed * 10) % 10 === 0) {
-            console.warn('⚠️  PLAYBACK (Cartesian): URDF robot not loaded yet');
           }
         }
       }
     }, 1000 / DEFAULT_FPS); // 60fps
 
     return () => {
-      console.log('⏹️  PLAYBACK STOPPED');
       clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, startTime, duration, motionMode, keyframes, cartesianKeyframes, setCurrentTime, stop]);
+  }, [isPlaying, startTime, duration, motionMode, keyframes, cartesianKeyframes, setCurrentTime, stop, executeOnRobot]);
 }

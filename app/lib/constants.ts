@@ -16,15 +16,10 @@ export const JOINT_LIMITS: Record<string, JointLimit> = {
   J6: { min: 0, max: 360 }
 };
 
-// Standby position (degrees)
-export const STANDBY_POSITION: JointAngles = {
-  J1: 0,
-  J2: -90,
-  J3: 180,
-  J4: 0,
-  J5: 0,
-  J6: 180
-};
+// Joint angle offsets for URDF visualization (degrees)
+// These offsets correct the visual model to match the real robot's coordinate system
+export const JOINT_ANGLE_OFFSETS = [0, 90, 180, -90, 0, 180];
+//                                 J1  J2  J3   J4  J5  J6
 
 // Timeline colors (one per joint track)
 export const JOINT_COLORS = [

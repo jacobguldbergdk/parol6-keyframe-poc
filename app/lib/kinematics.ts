@@ -9,8 +9,9 @@
 
 import * as THREE from 'three';
 import { JointAngles, CartesianPose, IkAxisMask } from './types';
-import { STANDBY_POSITION, ORIENTATION_CONFIG } from './constants';
+import { STANDBY_POSITION, ORIENTATION_CONFIG, JOINT_ANGLE_OFFSETS } from './constants';
 import { useTimelineStore } from './store';
+import { calculateTcpPoseFromUrdf } from './tcpCalculations';
 
 // DH Parameters from PAROL6_ROBOT.py (converted to mm)
 const DH_PARAMS = {
@@ -24,28 +25,6 @@ const DH_PARAMS = {
   // alpha values (radians)
   alpha: [-Math.PI / 2, Math.PI, Math.PI / 2, -Math.PI / 2, Math.PI / 2, Math.PI]
 };
-
-/**
- * Forward Kinematics - TEMPORARILY DISABLED
- *
- * REASON: Previous implementation used simplified geometric approximation that was
- * fundamentally incorrect. It didn't properly account for all 6 joints' contribution
- * to TCP position and produced wildly inaccurate results.
- *
- * TODO: Implement proper FK using full DH transformation matrices from PAROL6_ROBOT.py
- *
- * For now, use ActualTCPVisualizer which reads ACCURATE position from URDF model.
- *
- * @param jointAngles - Joint angles in degrees (J1-J6)
- * @returns Stub implementation - returns zero pose with warning
- */
-export function forwardKinematics(jointAngles: JointAngles): CartesianPose {
-  console.warn('⚠️  FK: Forward kinematics temporarily disabled - broken implementation removed');
-  console.warn('⚠️  FK: Use ActualTCPVisualizer for accurate TCP position from URDF');
-
-  // Return zero pose - DO NOT USE THIS FOR CALCULATIONS
-  return { X: 0, Y: 0, Z: 0, RX: 0, RY: 0, RZ: 0 };
-}
 
 export interface IKResult {
   success: boolean;
@@ -83,12 +62,6 @@ export function numericalIK(
   tolerance: number = 1.0
 ): IKResult {
   const activeAxes = Object.entries(axisMask).filter(([_, enabled]) => enabled).map(([axis]) => axis);
-  console.log('🔧 Numerical IK: Starting solver', {
-    target: `X:${targetPose.X.toFixed(1)} Y:${targetPose.Y.toFixed(1)} Z:${targetPose.Z.toFixed(1)} RX:${targetPose.RX.toFixed(1)}° RY:${targetPose.RY.toFixed(1)}° RZ:${targetPose.RZ.toFixed(1)}°`,
-    axes: activeAxes.join(','),
-    maxIter: maxIterations,
-    tolerance: `${tolerance}mm/deg`
-  });
 
   if (!urdfRobot) {
     return {
@@ -136,13 +109,6 @@ export function numericalIK(
 
     // Check convergence
     if (errorNorm < tolerance) {
-      console.log(`✅ Numerical IK: Converged in ${iter + 1} iterations`, {
-        finalError: `${errorNorm.toFixed(2)}mm`,
-        joints: Object.entries(joints)
-          .map(([j, a]) => `${j}:${a.toFixed(1)}°`)
-          .join(' ')
-      });
-
       return {
         success: true,
         jointAngles: joints,
@@ -201,7 +167,6 @@ export function numericalIK(
 
     // Log progress every 10 iterations
     if ((iter + 1) % 10 === 0) {
-      console.log(`🔧 Numerical IK: Iteration ${iter + 1}, error: ${errorNorm.toFixed(2)}mm`);
     }
   }
 
@@ -217,10 +182,6 @@ export function numericalIK(
         (axisMask.RZ ? normalizeAngleDelta(targetPose.RZ - finalTcp.RZ) ** 2 : 0)
       )
     : Infinity;
-
-  console.warn(`⚠️  Numerical IK: Failed to converge after ${maxIterations} iterations`, {
-    finalError: `${finalError.toFixed(2)}mm`
-  });
 
   return {
     success: false,
@@ -486,89 +447,21 @@ function getURDFTcpPose(
   try {
     // Apply joint angle transformations (from RobotViewer)
     const angleSigns = [1, 1, -1, -1, -1, -1];
-    const angleOffsets = [0, 90, 180, 0, 0, 180];
 
     const jointNames = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6'] as const;
     jointNames.forEach((joint, index) => {
       const angleDeg = jointAngles[joint];
       const sign = angleSigns[index];
-      const offset = angleOffsets[index];
+      const offset = JOINT_ANGLE_OFFSETS[index];
       const correctedAngleDeg = angleDeg * sign + offset;
       const angleRad = (correctedAngleDeg * Math.PI) / 180;
       const linkName = `L${index + 1}`;
       urdfRobot.setJointValue(linkName, angleRad);
     });
 
-    // Get L6 link world transform
-    const l6Link = urdfRobot.links['L6'];
-    if (!l6Link) return null;
-
-    l6Link.updateMatrixWorld(true);
-
-    // Get L6 world position (using Three.js Vector3)
-    const l6WorldPosition = new THREE.Vector3();
-    l6Link.getWorldPosition(l6WorldPosition);
-
-    // Get L6 world quaternion for offset rotation (using Three.js Quaternion)
-    const l6WorldQuaternion = new THREE.Quaternion();
-    l6Link.getWorldQuaternion(l6WorldQuaternion);
-
-    // Apply TCP offset in L6 local frame (convert mm to meters)
-    const localOffset = new THREE.Vector3(
-      tcpOffset.x / 1000,
-      tcpOffset.y / 1000,
-      tcpOffset.z / 1000
-    );
-
-    // Transform offset from L6 local space to world space
-    const worldOffset = localOffset.applyQuaternion(l6WorldQuaternion);
-
-    // Final TCP position = L6 position + transformed offset
-    const tcpWorldPosition = l6WorldPosition.add(worldOffset);
-
-    // TCP orientation is same as L6 orientation (TCP offset is translation-only)
-    // Use orientation config constant
-    const orientationConfig = ORIENTATION_CONFIG;
-
-    // Transform orientation from world frame to viewport frame (if enabled)
-    // The robot parent has rotation={[-Math.PI/2, 0, 0]} (rotated -90° around X)
-    let quaternionToUse = l6WorldQuaternion;
-
-    if (orientationConfig.applyQuaternionTransform) {
-      // Apply inverse of parent rotation to undo coordinate frame transformation
-      const parentRotation = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(-Math.PI / 2, 0, 0, 'XYZ')  // The actual parent rotation
-      );
-      const parentRotationInverse = parentRotation.clone().invert();
-      quaternionToUse = parentRotationInverse.clone().multiply(l6WorldQuaternion);
-    }
-
-    // Extract Euler angles using configured order
-    const euler = new THREE.Euler().setFromQuaternion(
-      quaternionToUse,
-      orientationConfig.eulerOrder
-    );
-
-    // Apply orientation offset and negation
-    const rx_raw = (euler.x * 180) / Math.PI;
-    const ry_raw = (euler.y * 180) / Math.PI;
-    const rz_raw = (euler.z * 180) / Math.PI;
-
-    // Apply offset, then apply negation
-    const rx_final = (orientationConfig.negateRX ? -1 : 1) * (rx_raw - orientationConfig.offset.RX);
-    const ry_final = (orientationConfig.negateRY ? -1 : 1) * (ry_raw - orientationConfig.offset.RY);
-    const rz_final = (orientationConfig.negateRZ ? -1 : 1) * (rz_raw - orientationConfig.offset.RZ);
-
-    return {
-      X: tcpWorldPosition.x * 1000,
-      Y: -tcpWorldPosition.z * 1000,
-      Z: tcpWorldPosition.y * 1000,
-      RX: rx_final,
-      RY: ry_final,
-      RZ: rz_final
-    };
+    // Calculate TCP pose using shared utility
+    return calculateTcpPoseFromUrdf(urdfRobot, tcpOffset);
   } catch (e) {
-    console.error('getURDFTcpPose error:', e);
     return null;
   }
 }

@@ -280,8 +280,8 @@
     <axis
       xyz="0 0 -1" />
     <limit
-      lower="-2"
-      upper="2"
+      lower="-3.5"
+      upper="0.5"
       effort="300"
       velocity="3" />
   </joint>

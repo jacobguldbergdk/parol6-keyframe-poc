@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTimelineStore } from '@/app/lib/store';
 import { JOINT_NAMES, JOINT_COLORS, CARTESIAN_AXES } from '@/app/lib/constants';
+import { usePrePlaybackPosition } from '@/app/hooks/usePrePlaybackPosition';
 
 // Add CSS for outline nodes
 if (typeof document !== 'undefined') {
@@ -48,7 +49,6 @@ export default function Timeline() {
 
   // Function to register event handlers on timeline instance
   const registerEventHandlers = (timeline: any) => {
-    console.log('🔧 Registering event handlers');
 
     // Listen for time changes (playhead scrubbing)
     if (timeline.onTimeChanged) {
@@ -60,7 +60,6 @@ export default function Timeline() {
     // Listen for keyframe changes (dragging)
     if (timeline.onKeyframeChanged) {
       timeline.onKeyframeChanged((args: any) => {
-        console.log('🎯 onKeyframeChanged FIRED!', args);
 
         // FIX: keyframe data is at args.target.keyframe, NOT args.target.model
         const keyframe = args.target?.keyframe;
@@ -71,22 +70,8 @@ export default function Timeline() {
           const storeState = useTimelineStore.getState();
 
           if (storeState.timeline.mode === 'joint') {
-            const kf = storeState.timeline.keyframes.find(k => k.id === keyframe.keyframeId);
-            console.log('🎯 KEYFRAME DRAG (Joint):', {
-              keyframeId: keyframe.keyframeId,
-              joint: kf?.joint || 'UNKNOWN',
-              oldTime: `${oldTime.toFixed(2)}s`,
-              newTime: `${newTime.toFixed(2)}s`
-            });
             updateKeyframe(keyframe.keyframeId, { time: newTime });
           } else {
-            const kf = storeState.timeline.cartesianKeyframes.find(k => k.id === keyframe.keyframeId);
-            console.log('🎯 KEYFRAME DRAG (Cartesian):', {
-              keyframeId: keyframe.keyframeId,
-              axis: kf?.axis || 'UNKNOWN',
-              oldTime: `${oldTime.toFixed(2)}s`,
-              newTime: `${newTime.toFixed(2)}s`
-            });
             updateCartesianKeyframe(keyframe.keyframeId, { time: newTime });
           }
         }
@@ -116,7 +101,6 @@ export default function Timeline() {
   useEffect(() => {
     if (!containerRef.current || !isClient) return;
 
-    console.log('🎬 TIMELINE INIT: Mode =', motionMode);
 
     // Dynamically import animation-timeline-js only on client
     import('animation-timeline-js').then((module) => {
@@ -204,10 +188,8 @@ export default function Timeline() {
           }
         };
       } catch (error) {
-        console.error('Timeline initialization error:', error);
       }
     }).catch((error) => {
-      console.error('Failed to load animation-timeline-js:', error);
     });
   }, [setCurrentTime, updateKeyframe, updateCartesianKeyframe, motionMode, isClient]);
 
@@ -239,32 +221,13 @@ export default function Timeline() {
           hidden: false
         }));
 
-    if (motionMode === 'joint') {
-      console.log('📊 TIMELINE MODEL UPDATE (Joint):', {
-        totalKeyframes: keyframes.length,
-        byJoint: JOINT_NAMES.map(joint => ({
-          joint,
-          count: keyframes.filter(kf => kf.joint === joint).length,
-          times: keyframes.filter(kf => kf.joint === joint).map(kf => kf.time.toFixed(2) + 's').join(', ')
-        }))
-      });
-    } else {
-      console.log('📊 TIMELINE MODEL UPDATE (Cartesian):', {
-        totalKeyframes: cartesianKeyframes.length,
-        byAxis: CARTESIAN_AXES.map(axis => ({
-          axis,
-          count: cartesianKeyframes.filter(kf => kf.axis === axis).length,
-          times: cartesianKeyframes.filter(kf => kf.axis === axis).map(kf => kf.time.toFixed(2) + 's').join(', ')
-        }))
-      });
-    }
+    // Keyframe update complete (removed debug logging)
 
     try {
       timelineRef.current.setModel({ rows });
       // Re-register event handlers after setModel
       registerEventHandlers(timelineRef.current);
     } catch (e) {
-      console.error('Error updating timeline model:', e);
     }
   }, [keyframes, cartesianKeyframes, motionMode, isClient]);
 
@@ -307,6 +270,9 @@ export default function Timeline() {
   const recordKeyframes = useTimelineStore((state) => state.recordKeyframes);
   const recordCartesianKeyframes = useTimelineStore((state) => state.recordCartesianKeyframes);
 
+  // Pre-playback positioning hook
+  const { moveToStartAndPlay, isMovingToStart, moveError, clearError } = usePrePlaybackPosition();
+
   const handleRecord = () => {
     if (motionMode === 'joint') {
       recordKeyframes();
@@ -342,7 +308,7 @@ export default function Timeline() {
       >
         {/* Playback buttons */}
         <button
-          onClick={play}
+          onClick={() => play(false)}
           className="button material-icons"
           style={{
             padding: '0px',
@@ -354,11 +320,33 @@ export default function Timeline() {
             border: 'none',
             cursor: 'pointer'
           }}
-          title="Play"
+          title="Play Preview (Visual Only)"
           onMouseOver={(e) => e.currentTarget.style.background = '#201616'}
           onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
         >
           play_arrow
+        </button>
+
+        <button
+          onClick={moveToStartAndPlay}
+          disabled={isMovingToStart}
+          className="button material-icons"
+          style={{
+            padding: '0px',
+            width: '44px',
+            minWidth: '44px',
+            marginRight: '5px',
+            color: isMovingToStart ? '#ff9800' : '#4caf50',
+            background: 'transparent',
+            border: 'none',
+            cursor: isMovingToStart ? 'wait' : 'pointer',
+            opacity: isMovingToStart ? 0.7 : 1
+          }}
+          title={isMovingToStart ? 'Moving to start position...' : 'Play Execute (Send to Robot)'}
+          onMouseOver={(e) => { if (!isMovingToStart) e.currentTarget.style.background = '#201616' }}
+          onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+        >
+          {isMovingToStart ? 'hourglass_empty' : 'send'}
         </button>
 
         <button
@@ -459,6 +447,35 @@ export default function Timeline() {
           {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
         </div>
       </div>
+
+      {/* Error Banner */}
+      {moveError && (
+        <div style={{
+          backgroundColor: '#d32f2f',
+          color: 'white',
+          padding: '8px 12px',
+          fontSize: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <span>{moveError}</span>
+          <button
+            onClick={clearError}
+            className="material-icons"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'white',
+              cursor: 'pointer',
+              padding: '0',
+              fontSize: '18px'
+            }}
+          >
+            close
+          </button>
+        </div>
+      )}
 
       {/* Footer: Outline + Timeline */}
       <div style={{ display: 'flex', flex: 1, minHeight: '200px' }}>
