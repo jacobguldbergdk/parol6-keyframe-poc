@@ -2,6 +2,18 @@
 
 This document tracks the progress of migrating from the monolithic `app/lib/store.ts` to the new 5-store architecture.
 
+## Summary
+
+**Completed:** 5/6 phases (83%) - Timeline components intentionally skipped per user request
+
+- ✅ Phase 1: Cleanup & Foundation
+- ✅ Phase 2: New Store Architecture
+- ✅ Phase 3: Visualization Components (TCP visualizers, WebSocket connector)
+- ✅ Phase 4: Input Components (JointSliders, CartesianSliders, CompactJointSliders)
+- ✅ Phase 5: Non-Timeline Components (RobotViewer, TargetPoseVisualizer, useActualFollowsTarget)
+- ⏳ Phase 6: Timeline Components (SKIPPED - user requested to exclude timeline)
+- ⏳ Phase 7: Final Cleanup (remove old store when ready)
+
 ## Migration Progress
 
 ### ✅ Phase 1: Cleanup & Foundation (COMPLETED)
@@ -90,46 +102,47 @@ Migrated components that handle user input:
 
 ## ⚠️ Remaining Work
 
-### Phase 5: Large Complex Components (NOT STARTED)
+### ✅ Phase 5: Non-Timeline Components (COMPLETED)
 
-These components still use the old `useTimelineStore` and need migration:
+Migrated all non-timeline components (per user request to skip timeline):
 
-- ⏳ `RobotViewer.tsx` (781 lines) - **HIGH RISK**
-  - Main 3D visualization component
-  - Uses: currentJointAngles, targetRobotRef, actualRobotRef, targetFollowsActual
-  - Needs: useInputStore, useCommandStore, useHardwareStore
+- ✅ `TargetPoseVisualizer.tsx`
+  - Changed: `currentCartesianPose` → `inputCartesianPose`
+  - Now displays user's cartesian slider input (red/green/blue gizmo)
+  - Uses: `useInputStore`, `useTimelineStore`
 
-- ⏳ `Timeline.tsx` - **MEDIUM RISK**
-  - Timeline editor with keyframes
-  - Playback controls
-  - Needs: useTimelineStore, useCommandStore
+- ✅ `useActualFollowsTarget.ts` (Live Control Mode)
+  - Changed: `actualFollowsTarget` → `liveControlEnabled`
+  - Changed: `currentJointAngles` → `commandedJointAngles`
+  - Changed: `speed` now from `useCommandStore`
+  - Sends commanded values to robot via API
+  - Uses: `useCommandStore`, `useTimelineStore`
 
-- ⏳ `TargetPoseVisualizer.tsx` - **LOW RISK**
-  - Red/green/blue gizmo showing cartesian input
-  - Uses: currentCartesianPose
-  - Needs: useInputStore
+- ✅ `RobotViewer.tsx` (781 lines)
+  - Main 3D visualization component with comprehensive updates:
+    - **Robot refs**: `actualRobotRef` → `hardwareRobotRef`
+    - **Joint angles**: `currentJointAngles` → `commandedJointAngles` (for commanded robot), `inputJointAngles` (for keyboard input)
+    - **Cartesian**: `currentCartesianPose` → `inputCartesianPose`
+    - **TCP positions**: `targetTcpPosition` → `commandedTcpPose`, `actualTcpPosition` → `hardwareTcpPose`
+    - **Visibility**: `showActualRobot` → `showHardwareRobot`
+    - **Control modes**: `targetFollowsActual` → `teachModeEnabled`, `actualFollowsTarget` → `liveControlEnabled`
+    - **Teach mode logic**: Now copies `hardwareJointAngles` → `inputJointAngles` + `commandedJointAngles`
+    - **Keyboard controls**: Now update both input and commanded stores
+    - **UI labels**: "Target" → "Commanded", "Actual" → "Hardware"
+  - Uses: All 5 stores
 
-### Phase 6: Control Hooks (NOT STARTED)
+**Commit:** `778b412` refactor: migrate non-timeline components to new store architecture
 
-- ⏳ `useActualFollowsTarget.ts` (Live Control Mode)
-  - Sends commanded values to robot
-  - Uses: actualFollowsTarget, currentJointAngles, speed
-  - Needs: useCommandStore
+### ⏳ Phase 6: Timeline Components (SKIPPED - User Request)
 
-- ⏳ `useTargetFollowsActual.ts` (Teach Mode)
-  - Reads hardware feedback into input
-  - Uses: targetFollowsActual, actualJointAngles, setJointAngle
-  - Needs: useHardwareStore, useInputStore
+Timeline-related components intentionally NOT migrated per user request:
 
-- ⏳ `usePlayback.ts` (Timeline Playback)
-  - Timeline interpolation and execution
-  - Uses: playbackState, timeline, currentJointAngles
-  - Needs: useTimelineStore, useCommandStore
+- ⏳ `Timeline.tsx` - Timeline editor with keyframes and playback controls
+- ⏳ `usePlayback.ts` - Timeline interpolation and execution
+- ⏳ `usePrePlaybackPosition.ts` - Saves/restores position before playback
+- ⏳ `useScrubbing.ts` - Timeline scrubbing functionality
 
-- ⏳ `usePrePlaybackPosition.ts`
-  - Saves/restores position before playback
-  - Uses: playbackState, currentJointAngles
-  - Needs: useTimelineStore, useInputStore
+**Note**: `useTargetFollowsActual.ts` doesn't exist as a separate file - teach mode logic was implemented directly in RobotViewer (now migrated)
 
 ### Phase 7: Final Cleanup (NOT STARTED)
 
