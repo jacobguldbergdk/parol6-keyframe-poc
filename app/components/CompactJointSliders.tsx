@@ -3,37 +3,47 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { useTimelineStore } from '../lib/store';
+import { useInputStore, useCommandStore, useHardwareStore } from '@/app/lib/stores';
 import { JOINT_LIMITS, JOINT_NAMES } from '../lib/constants';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import type { JointName } from '@/app/lib/types';
 
 export default function CompactJointSliders() {
-  const currentJointAngles = useTimelineStore((state) => state.currentJointAngles);
-  const setJointAngle = useTimelineStore((state) => state.setJointAngle);
-  const stepAngle = useTimelineStore((state) => state.stepAngle);
-  const targetFollowsActual = useTimelineStore((state) => state.targetFollowsActual);
-  const actualFollowsTarget = useTimelineStore((state) => state.actualFollowsTarget);
+  // Input store: What user is controlling
+  const inputJointAngles = useInputStore((state) => state.inputJointAngles);
+  const setInputJointAngle = useInputStore((state) => state.setInputJointAngle);
 
-  // Get actual values from store (hardware feedback)
-  const actualJointAngles = useTimelineStore((state) => state.actualJointAngles) || currentJointAngles;
+  // Command store: Commanded state and control modes
+  const setCommandedJointAngle = useCommandStore((state) => state.setCommandedJointAngle);
+  const teachModeEnabled = useCommandStore((state) => state.teachModeEnabled);
+  const liveControlEnabled = useCommandStore((state) => state.liveControlEnabled);
 
-  const handleStepJoint = (joint: string, direction: number) => {
-    const currentValue = currentJointAngles[joint as keyof typeof currentJointAngles];
-    const limits = JOINT_LIMITS[joint as keyof typeof JOINT_LIMITS];
+  // Hardware store: Get actual values from hardware feedback
+  const hardwareJointAngles = useHardwareStore((state) => state.hardwareJointAngles) || inputJointAngles;
+
+  // Step angle for increment/decrement buttons (degrees)
+  const stepAngle = 5;
+
+  const handleStepJoint = (joint: JointName, direction: number) => {
+    const currentValue = inputJointAngles[joint];
+    const limits = JOINT_LIMITS[joint];
     const newValue = Math.max(limits.min, Math.min(limits.max, currentValue + (direction * stepAngle)));
-    setJointAngle(joint as any, newValue);
+
+    // Update both input and commanded stores (in joint mode they should match)
+    setInputJointAngle(joint, newValue);
+    setCommandedJointAngle(joint, newValue);
   };
 
   return (
     <Card className="p-3 h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold">Joint Control</h2>
-        {actualFollowsTarget && (
+        {liveControlEnabled && (
           <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded font-semibold">
             ⚡ LIVE MODE
           </span>
         )}
-        {targetFollowsActual && (
+        {teachModeEnabled && (
           <span className="text-[10px] bg-green-500/20 text-green-500 px-2 py-1 rounded font-semibold">
             🔗 FOLLOWING
           </span>
@@ -44,9 +54,9 @@ export default function CompactJointSliders() {
       <div className="flex-1 overflow-y-auto space-y-2">
         {JOINT_NAMES.map((joint) => {
           const limits = JOINT_LIMITS[joint];
-          const setValue = currentJointAngles[joint];
-          const actualValue = actualJointAngles[joint];
-          const error = Math.abs(setValue - actualValue);
+          const inputValue = inputJointAngles[joint];
+          const hardwareValue = hardwareJointAngles[joint];
+          const error = Math.abs(inputValue - hardwareValue);
 
           // Color coding based on tracking error
           let errorColor = 'text-green-500';
@@ -68,25 +78,29 @@ export default function CompactJointSliders() {
               </div>
 
               {/* Set Value Slider */}
-              <div className="flex items-center gap-2" title={targetFollowsActual ? 'Controls disabled - Target is following Actual robot' : ''}>
+              <div className="flex items-center gap-2" title={teachModeEnabled ? 'Controls disabled - Input is following hardware robot' : ''}>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => handleStepJoint(joint, -1)}
                   className="h-6 w-6 p-0"
-                  disabled={targetFollowsActual}
+                  disabled={teachModeEnabled}
                 >
                   <ChevronLeft className="h-3 w-3" />
                 </Button>
                 <div className="flex-1">
                   <Slider
-                    value={[setValue]}
-                    onValueChange={(value) => setJointAngle(joint as any, value[0])}
+                    value={[inputValue]}
+                    onValueChange={(value) => {
+                      // Update both input and commanded stores (in joint mode they should match)
+                      setInputJointAngle(joint, value[0]);
+                      setCommandedJointAngle(joint, value[0]);
+                    }}
                     min={limits.min}
                     max={limits.max}
                     step={0.1}
                     className="w-full"
-                    disabled={targetFollowsActual}
+                    disabled={teachModeEnabled}
                     tabIndex={-1}
                   />
                 </div>
@@ -95,12 +109,12 @@ export default function CompactJointSliders() {
                   size="sm"
                   onClick={() => handleStepJoint(joint, 1)}
                   className="h-6 w-6 p-0"
-                  disabled={targetFollowsActual}
+                  disabled={teachModeEnabled}
                 >
                   <ChevronRight className="h-3 w-3" />
                 </Button>
-                <span className={`text-xs font-mono w-12 text-right ${targetFollowsActual ? 'opacity-50' : ''}`}>
-                  {setValue.toFixed(1)}°
+                <span className={`text-xs font-mono w-12 text-right ${teachModeEnabled ? 'opacity-50' : ''}`}>
+                  {inputValue.toFixed(1)}°
                 </span>
               </div>
             </div>

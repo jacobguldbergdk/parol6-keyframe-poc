@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useTimelineStore } from '@/app/lib/store';
+import { useInputStore, useCommandStore, useRobotConfigStore } from '@/app/lib/stores';
 import { CARTESIAN_AXES, CARTESIAN_LIMITS } from '@/app/lib/constants';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
@@ -13,14 +13,20 @@ import { solveIKBackend, IKResult } from '@/app/lib/api';
 import { AlertCircle, CheckCircle, Calculator, Network, Copy } from 'lucide-react';
 
 export default function CartesianSliders() {
-  const currentCartesianPose = useTimelineStore((state) => state.currentCartesianPose);
-  const currentJointAngles = useTimelineStore((state) => state.currentJointAngles);
-  const setCartesianValue = useTimelineStore((state) => state.setCartesianValue);
-  const tcpOffset = useTimelineStore((state) => state.tcpOffset);
-  const targetRobotRef = useTimelineStore((state) => state.targetRobotRef);
-  const targetTcpPosition = useTimelineStore((state) => state.targetTcpPosition);
-  const ikAxisMask = useTimelineStore((state) => state.ikAxisMask);
-  const setIkAxisMask = useTimelineStore((state) => state.setIkAxisMask);
+  // Input store: What user is typing/moving in sliders
+  const inputCartesianPose = useInputStore((state) => state.inputCartesianPose);
+  const setInputCartesianValue = useInputStore((state) => state.setInputCartesianValue);
+
+  // Command store: Commanded joint angles (for IK seed and result)
+  const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
+  const setCommandedJointAngles = useCommandStore((state) => state.setCommandedJointAngles);
+  const targetRobotRef = useCommandStore((state) => state.targetRobotRef);
+  const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
+
+  // Config store: TCP offset and IK mask
+  const tcpOffset = useRobotConfigStore((state) => state.tcpOffset);
+  const ikAxisMask = useRobotConfigStore((state) => state.ikAxisMask);
+  const setIkAxisMask = useRobotConfigStore((state) => state.setIkAxisMask);
 
   const [ikStatus, setIkStatus] = useState<{
     type: 'idle' | 'computing' | 'success' | 'error';
@@ -42,10 +48,10 @@ export default function CartesianSliders() {
   // Track input field values separately to allow editing
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
 
-  // Handle slider changes: ONLY update target pose, NO IK computation
+  // Handle slider changes: ONLY update input pose, NO IK computation
   // IK will be computed later during timeline playback
   const handleSliderChange = (axis: CartesianAxis, value: number) => {
-    setCartesianValue(axis, value);
+    setInputCartesianValue(axis, value);
     // Clear IK status when user changes target
     if (ikStatus.type !== 'idle' || backendIkStatus.type !== 'idle') {
       setIkStatus({ type: 'idle' });
@@ -71,16 +77,16 @@ export default function CartesianSliders() {
     setTimeout(() => {
       // Target is TCP position - numerical IK handles TCP offset internally
       const ikResult = inverseKinematicsDetailed(
-        currentCartesianPose,
-        currentJointAngles,
+        inputCartesianPose,
+        commandedJointAngles,
         targetRobotRef,
         tcpOffset,
         ikAxisMask
       );
 
       if (ikResult.success && ikResult.jointAngles) {
-        // Update joint angles - robot will move to match target
-        useTimelineStore.setState({ currentJointAngles: ikResult.jointAngles });
+        // Update commanded joint angles - robot will move to match target
+        setCommandedJointAngles(ikResult.jointAngles);
         setIkStatus({
           type: 'success',
           message: `Converged in ${ikResult.iterations} iterations (error: ${ikResult.finalError?.toFixed(2)}mm)`,
@@ -116,8 +122,8 @@ export default function CartesianSliders() {
 
     try {
       const result = await solveIKBackend(
-        currentCartesianPose,
-        currentJointAngles,
+        inputCartesianPose,
+        commandedJointAngles,
         ikAxisMask,
         targetRobotRef,  // Pass URDF reference for quaternion extraction
         tcpOffset        // Pass TCP offset for consistency
@@ -126,8 +132,8 @@ export default function CartesianSliders() {
       setBackendResult(result);
 
       if (result.success && result.joints) {
-        // Update joint angles - robot will move to match target
-        useTimelineStore.setState({ currentJointAngles: result.joints });
+        // Update commanded joint angles - robot will move to match target
+        setCommandedJointAngles(result.joints);
         setBackendIkStatus({
           type: 'success',
           message: `Backend IK solved in ${result.iterations || '?'} iterations (residual: ${result.residual?.toFixed(4) || 'N/A'})`,
@@ -175,10 +181,10 @@ export default function CartesianSliders() {
         const limits = CARTESIAN_LIMITS[axis];
         // Clamp to limits
         const clampedValue = Math.max(limits.min, Math.min(limits.max, numValue));
-        setCartesianValue(axis, clampedValue);
+        setInputCartesianValue(axis, clampedValue);
       }
     }
-    // Clear input value to revert to showing currentCartesianPose
+    // Clear input value to revert to showing inputCartesianPose
     setInputValues({ ...inputValues, [axis]: '' });
     // Clear IK status when user changes target
     if (ikStatus.type !== 'idle' || backendIkStatus.type !== 'idle') {
@@ -195,23 +201,19 @@ export default function CartesianSliders() {
     }
   };
 
-  // Sync cartesian sliders to match target robot's actual TCP position
+  // Sync cartesian sliders to match commanded robot's actual TCP position
   const handleSyncToRobotTcp = () => {
-    if (!targetTcpPosition) {
+    if (!commandedTcpPose) {
       return;
     }
 
-    // Copy all 6 values from targetTcpPosition to currentCartesianPose
-    useTimelineStore.setState({
-      currentCartesianPose: {
-        X: targetTcpPosition.X,
-        Y: targetTcpPosition.Y,
-        Z: targetTcpPosition.Z,
-        RX: targetTcpPosition.RX,
-        RY: targetTcpPosition.RY,
-        RZ: targetTcpPosition.RZ
-      }
-    });
+    // Copy all 6 values from commandedTcpPose to inputCartesianPose
+    setInputCartesianValue('X', commandedTcpPose.X);
+    setInputCartesianValue('Y', commandedTcpPose.Y);
+    setInputCartesianValue('Z', commandedTcpPose.Z);
+    setInputCartesianValue('RX', commandedTcpPose.RX);
+    setInputCartesianValue('RY', commandedTcpPose.RY);
+    setInputCartesianValue('RZ', commandedTcpPose.RZ);
 
     // Clear IK status since we're resetting to a known position
     setIkStatus({ type: 'idle' });
@@ -228,7 +230,7 @@ export default function CartesianSliders() {
           const limits = CARTESIAN_LIMITS[axis];
           const unit = getUnit(axis);
           const step = getStep(axis);
-          const currentValue = currentCartesianPose[axis];
+          const currentValue = inputCartesianPose[axis];
           const displayValue = inputValues[axis] !== undefined && inputValues[axis] !== ''
             ? inputValues[axis]
             : currentValue.toFixed(1);
@@ -290,7 +292,7 @@ export default function CartesianSliders() {
       <div className="mt-4">
         <Button
           onClick={handleSyncToRobotTcp}
-          disabled={!targetTcpPosition}
+          disabled={!commandedTcpPose}
           className="w-full"
           variant="outline"
           size="sm"
@@ -299,7 +301,7 @@ export default function CartesianSliders() {
           Copy From Robot TCP
         </Button>
         <div className="mt-1 text-xs text-muted-foreground italic text-center">
-          Sync sliders to target robot's actual position
+          Sync sliders to commanded robot's actual position
         </div>
       </div>
 

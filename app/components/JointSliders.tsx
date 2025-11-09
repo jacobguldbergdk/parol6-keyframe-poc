@@ -1,14 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { useTimelineStore } from '@/app/lib/store';
+import { useInputStore, useCommandStore } from '@/app/lib/stores';
 import { JOINT_NAMES, JOINT_LIMITS } from '@/app/lib/constants';
 import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
+import type { JointName } from '@/app/lib/types';
 
 export default function JointSliders() {
-  const currentJointAngles = useTimelineStore((state) => state.currentJointAngles);
-  const setJointAngle = useTimelineStore((state) => state.setJointAngle);
+  const inputJointAngles = useInputStore((state) => state.inputJointAngles);
+  const setInputJointAngle = useInputStore((state) => state.setInputJointAngle);
+  const setCommandedJointAngle = useCommandStore((state) => state.setCommandedJointAngle);
 
   // Track input field values separately to allow editing
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
@@ -18,19 +20,28 @@ export default function JointSliders() {
     setInputValues({ ...inputValues, [joint]: value });
   };
 
-  const handleInputBlur = (joint: string) => {
+  const handleInputBlur = (joint: JointName) => {
     const value = inputValues[joint];
     if (value !== undefined && value !== '') {
       const numValue = parseFloat(value);
       if (!isNaN(numValue)) {
-        const limits = JOINT_LIMITS[joint as keyof typeof JOINT_LIMITS];
+        const limits = JOINT_LIMITS[joint];
         // Clamp to joint limits
         const clampedValue = Math.max(limits.min, Math.min(limits.max, numValue));
-        setJointAngle(joint as any, clampedValue);
+
+        // Update both input and commanded stores (in joint mode they should match)
+        setInputJointAngle(joint, clampedValue);
+        setCommandedJointAngle(joint, clampedValue);
       }
     }
-    // Clear input value to revert to showing currentJointAngles
+    // Clear input value to revert to showing inputJointAngles
     setInputValues({ ...inputValues, [joint]: '' });
+  };
+
+  const handleSliderChange = (joint: JointName, value: number) => {
+    // Update both input and commanded stores (in joint mode they should match)
+    setInputJointAngle(joint, value);
+    setCommandedJointAngle(joint, value);
   };
 
   const handleInputKeyDown = (joint: string, e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -43,10 +54,10 @@ export default function JointSliders() {
     <div className="space-y-4">
       {JOINT_NAMES.map((joint) => {
         const limits = JOINT_LIMITS[joint];
-        const currentValue = currentJointAngles[joint];
+        const inputValue = inputJointAngles[joint];
         const displayValue = inputValues[joint] !== undefined && inputValues[joint] !== ''
           ? inputValues[joint]
-          : currentValue.toFixed(1);
+          : inputValue.toFixed(1);
 
         return (
           <div key={joint} className="space-y-2">
@@ -68,8 +79,8 @@ export default function JointSliders() {
               min={limits.min}
               max={limits.max}
               step={0.1}
-              value={[currentValue]}
-              onValueChange={(values) => setJointAngle(joint as any, values[0])}
+              value={[inputValue]}
+              onValueChange={(values) => handleSliderChange(joint, values[0])}
               className="w-full"
             />
           </div>
