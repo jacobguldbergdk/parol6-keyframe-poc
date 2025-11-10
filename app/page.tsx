@@ -36,6 +36,11 @@ export default function Home() {
   const motionMode = useTimelineStore((state) => state.timeline.mode);
   const setMotionMode = useTimelineStore((state) => state.setMotionMode);
   const setTcpOffset = useRobotConfigStore((state) => state.setTcpOffset);
+  const setHardwareRobotColor = useRobotConfigStore((state) => state.setHardwareRobotColor);
+  const setHardwareRobotTransparency = useRobotConfigStore((state) => state.setHardwareRobotTransparency);
+  const setCommanderRobotColor = useRobotConfigStore((state) => state.setCommanderRobotColor);
+  const setCommanderRobotTransparency = useRobotConfigStore((state) => state.setCommanderRobotTransparency);
+  const setSpeed = useCommandStore((state) => state.setSpeed);
   const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
 
   // Track if we've synced the RGB gizmo for current cartesian session
@@ -51,7 +56,7 @@ export default function Home() {
     initializeConfig();
   }, [fetchConfig]);
 
-  // Sync tcp_offset from config to timelineStore when config loads
+  // Sync tcp_offset from config to robotConfigStore when config loads
   useEffect(() => {
     if (config?.ui?.tcp_offset) {
       setTcpOffset('x', config.ui.tcp_offset.x);
@@ -59,6 +64,25 @@ export default function Home() {
       setTcpOffset('z', config.ui.tcp_offset.z);
     }
   }, [config, setTcpOffset]);
+
+  // Sync default_speed_percentage from config to commandStore when config loads
+  useEffect(() => {
+    if (config?.ui?.default_speed_percentage !== undefined) {
+      setSpeed(config.ui.default_speed_percentage);
+    }
+  }, [config, setSpeed]);
+
+  // Sync robot appearance from config to robotConfigStore when config loads
+  useEffect(() => {
+    if (config?.ui?.hardware_robot) {
+      setHardwareRobotColor(config.ui.hardware_robot.color);
+      setHardwareRobotTransparency(config.ui.hardware_robot.transparency);
+    }
+    if (config?.ui?.commander_robot) {
+      setCommanderRobotColor(config.ui.commander_robot.color);
+      setCommanderRobotTransparency(config.ui.commander_robot.transparency);
+    }
+  }, [config, setHardwareRobotColor, setHardwareRobotTransparency, setCommanderRobotColor, setCommanderRobotTransparency]);
 
   // Auto-sync cartesian pose to robot TCP when switching to cartesian mode
   // Only runs ONCE per cartesian session to prevent feedback loop

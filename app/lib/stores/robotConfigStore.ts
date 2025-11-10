@@ -15,15 +15,29 @@ export interface RobotConfigStore {
   // Default: Full 6DoF (all axes enabled)
   ikAxisMask: IkAxisMask;
 
+  // Robot appearance settings
+  hardwareRobotColor: string;        // Hardware (ghost) robot color
+  hardwareRobotTransparency: number; // Hardware robot transparency (0-1)
+  commanderRobotColor: string;       // Commander (target) robot color
+  commanderRobotTransparency: number; // Commander robot transparency (0-1)
+
   // Actions
   setTcpOffset: (axis: 'x' | 'y' | 'z', value: number) => void;
   setIkAxisMask: (updates: Partial<IkAxisMask>) => void;
+  setHardwareRobotColor: (color: string) => void;
+  setHardwareRobotTransparency: (transparency: number) => void;
+  setCommanderRobotColor: (color: string) => void;
+  setCommanderRobotTransparency: (transparency: number) => void;
 }
 
 export const useRobotConfigStore = create<RobotConfigStore>((set) => ({
   // Initial state
   tcpOffset: { x: 47, y: 0, z: -62 },
   ikAxisMask: { X: true, Y: true, Z: true, RX: true, RY: true, RZ: true },
+  hardwareRobotColor: '#808080',
+  hardwareRobotTransparency: 0.35,
+  commanderRobotColor: '#4ECDC4',
+  commanderRobotTransparency: 1.0,
 
   // Actions
   setTcpOffset: (axis, value) => {
@@ -42,5 +56,10 @@ export const useRobotConfigStore = create<RobotConfigStore>((set) => ({
         ...updates
       }
     }));
-  }
+  },
+
+  setHardwareRobotColor: (color) => set({ hardwareRobotColor: color }),
+  setHardwareRobotTransparency: (transparency) => set({ hardwareRobotTransparency: transparency }),
+  setCommanderRobotColor: (color) => set({ commanderRobotColor: color }),
+  setCommanderRobotTransparency: (transparency) => set({ commanderRobotTransparency: transparency })
 }));

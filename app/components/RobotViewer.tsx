@@ -12,6 +12,7 @@ import JointLabels from './JointLabels';
 import InteractiveRobotMeshes from './InteractiveRobotMeshes';
 import { JointContextMenu } from './JointContextMenu';
 import { TCPPoseDisplay, TCPPoseHeader } from './TCPPoseDisplay';
+import { MemoryMonitor, WebGLContextMonitor } from './MemoryMonitor';
 import { JOINT_LIMITS, JOINT_ANGLE_OFFSETS, CARTESIAN_LIMITS } from '../lib/constants';
 import type { JointName, CartesianAxis } from '../lib/types';
 import { inverseKinematicsDetailed } from '../lib/kinematics';
@@ -150,12 +151,14 @@ function URDFRobot({ showLabels }: URDFRobotProps) {
                   clonedMat.transparent = true;
 
                   // Base (no jointName) should be fully transparent
-                  // Joints start red (unhomed) and turn blue when homed
+                  // Joints use configured hardware robot color and transparency
                   if (!jointName) {
                     clonedMat.opacity = 0; // Fully transparent base
                   } else {
-                    clonedMat.opacity = 0.35;
-                    clonedMat.color.setHex(0xff0000); // Red - unhomed initial state
+                    const opacity = useRobotConfigStore.getState().hardwareRobotTransparency;
+                    const color = useRobotConfigStore.getState().hardwareRobotColor;
+                    clonedMat.opacity = opacity;
+                    clonedMat.color.set(color);
                   }
 
                   clonedMat.depthWrite = false;
@@ -277,34 +280,51 @@ function URDFRobot({ showLabels }: URDFRobotProps) {
     });
   }, [hardwareJointAngles]);
 
-  // Update hardware robot colors based on homing status
+  // Update hardware robot appearance when config changes
   useEffect(() => {
     if (!hardwareRobotRef.current) return;
 
     hardwareRobotRef.current.traverse((child: any) => {
       if (child.isMesh && child.userData.isActual && child.userData.jointName) {
-        const jointName = child.userData.jointName as JointName;
-        const isHomed = jointHomedStatus[jointName];
-
-        // Red = unhomed, Blue = homed
-        const color = isHomed ? 0x64B5F6 : 0xff0000;
-
         // Handle both single materials and material arrays
         const materials = Array.isArray(child.material) ? child.material : [child.material];
 
         materials.forEach((mat: any) => {
           if (mat && mat.userData.isActualMaterial) {
-            // Update color while preserving transparency properties
-            mat.color.setHex(color);
+            // Update color and transparency from config
+            mat.color.set(hardwareRobotColor);
             mat.transparent = true;
-            mat.opacity = 0.35;
+            mat.opacity = hardwareRobotTransparency;
             mat.depthWrite = false;
             mat.needsUpdate = true;
           }
         });
       }
     });
-  }, [jointHomedStatus]);
+  }, [hardwareRobotColor, hardwareRobotTransparency]);
+
+  // Update commander robot appearance when config changes
+  useEffect(() => {
+    if (!robotRef.current) return;
+
+    robotRef.current.traverse((child: any) => {
+      if (child.isMesh && !child.userData.isActual && child.userData.jointName) {
+        // Handle both single materials and material arrays
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+
+        materials.forEach((mat: any) => {
+          if (mat && mat.userData.isCloned) {
+            // Update color and transparency from config
+            mat.color.set(commanderRobotColor);
+            mat.transparent = commanderRobotTransparency < 1.0;
+            mat.opacity = commanderRobotTransparency;
+            mat.depthWrite = commanderRobotTransparency >= 1.0;
+            mat.needsUpdate = true;
+          }
+        });
+      }
+    });
+  }, [commanderRobotColor, commanderRobotTransparency]);
 
   return (
     <>
@@ -356,6 +376,10 @@ export default function RobotViewer() {
   // Config store: Robot configuration
   const tcpOffset = useRobotConfigStore((state) => state.tcpOffset);
   const ikAxisMask = useRobotConfigStore((state) => state.ikAxisMask);
+  const hardwareRobotColor = useRobotConfigStore((state) => state.hardwareRobotColor);
+  const hardwareRobotTransparency = useRobotConfigStore((state) => state.hardwareRobotTransparency);
+  const commanderRobotColor = useRobotConfigStore((state) => state.commanderRobotColor);
+  const commanderRobotTransparency = useRobotConfigStore((state) => state.commanderRobotTransparency);
 
   // Step angle for keyboard controls (degrees)
   const stepAngle = 5;
@@ -771,6 +795,9 @@ export default function RobotViewer() {
           {motionMode === 'cartesian' && <TargetPoseVisualizer />}
         </Suspense>
         <OrbitControls target={[0, 0.2, 0]} />
+
+        {/* WebGL Context Loss Monitor - detects and logs WebGL crashes */}
+        <WebGLContextMonitor />
 
         {/* Interactive rotating coordinate system gizmo */}
         <GizmoHelper alignment="bottom-right" margin={[80, 80]}>

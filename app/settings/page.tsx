@@ -14,9 +14,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Save, RotateCcw, AlertCircle, Loader2 } from 'lucide-react';
+import { Save, RotateCcw, AlertCircle, Loader2, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useConfigStore, Config } from '../lib/configStore';
 import { getApiBaseUrl } from '../lib/apiConfig';
+import { JOINT_LIMITS } from '../lib/constants';
 
 export default function SettingsPage() {
   const { config, isLoading, error, fetchConfig, saveConfig } = useConfigStore();
@@ -25,6 +26,10 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [availablePorts, setAvailablePorts] = useState<(string | { device: string; description: string; hwid: string })[]>([]);
   const [loadingPorts, setLoadingPorts] = useState(false);
+
+  // Saved position editor state
+  const [editingPosition, setEditingPosition] = useState<{ index: number; name: string; joints: number[] } | null>(null);
+  const [isAddingPosition, setIsAddingPosition] = useState(false);
 
   // Fetch config on mount
   useEffect(() => {
@@ -90,6 +95,84 @@ export default function SettingsPage() {
 
     setLocalConfig(newConfig);
     setHasChanges(true);
+  };
+
+  // Validate joint angles against limits
+  const validateJointAngles = (joints: number[]): { valid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    if (joints.length !== 6) {
+      errors.push('Must have exactly 6 joint values');
+      return { valid: false, errors };
+    }
+
+    joints.forEach((angle, index) => {
+      const jointName = `J${index + 1}`;
+      const limits = JOINT_LIMITS[jointName];
+      if (angle < limits.min || angle > limits.max) {
+        errors.push(`${jointName}: ${angle.toFixed(1)}° is out of range [${limits.min.toFixed(1)}°, ${limits.max.toFixed(1)}°]`);
+      }
+    });
+
+    return { valid: errors.length === 0, errors };
+  };
+
+  const handleAddPosition = () => {
+    setIsAddingPosition(true);
+    setEditingPosition({ index: -1, name: '', joints: [90, -90, 180, 0, 0, 180] });
+  };
+
+  const handleEditPosition = (index: number) => {
+    if (!localConfig) return;
+    const position = localConfig.ui.saved_positions[index];
+    setIsAddingPosition(false);
+    setEditingPosition({ index, name: position.name, joints: [...position.joints] });
+  };
+
+  const handleDeletePosition = (index: number) => {
+    if (!localConfig) return;
+    if (!confirm(`Delete position "${localConfig.ui.saved_positions[index].name}"?`)) return;
+
+    const newPositions = localConfig.ui.saved_positions.filter((_, i) => i !== index);
+    updateConfig(['ui', 'saved_positions'], newPositions);
+  };
+
+  const handleSavePosition = () => {
+    if (!localConfig || !editingPosition) return;
+
+    // Validate name
+    if (!editingPosition.name.trim()) {
+      alert('Position name cannot be empty');
+      return;
+    }
+
+    // Validate joint angles
+    const validation = validateJointAngles(editingPosition.joints);
+    if (!validation.valid) {
+      alert('Invalid joint angles:\n' + validation.errors.join('\n'));
+      return;
+    }
+
+    const newPosition = { name: editingPosition.name, joints: editingPosition.joints };
+    let newPositions;
+
+    if (isAddingPosition) {
+      // Add new position
+      newPositions = [...localConfig.ui.saved_positions, newPosition];
+    } else {
+      // Update existing position
+      newPositions = localConfig.ui.saved_positions.map((pos, i) =>
+        i === editingPosition.index ? newPosition : pos
+      );
+    }
+
+    updateConfig(['ui', 'saved_positions'], newPositions);
+    setEditingPosition(null);
+    setIsAddingPosition(false);
+  };
+
+  const handleCancelEditPosition = () => {
+    setEditingPosition(null);
+    setIsAddingPosition(false);
   };
 
   if (isLoading && !localConfig) {
@@ -179,23 +262,6 @@ export default function SettingsPage() {
           <Card className="p-6">
             <h2 className="text-xl font-semibold mb-4">Basic Settings</h2>
             <div className="space-y-4">
-              {/* Theme */}
-              <div className="grid grid-cols-3 items-center gap-4">
-                <Label>Theme</Label>
-                <Select
-                  value={localConfig.ui.theme}
-                  onValueChange={(value) => updateConfig(['ui', 'theme'], value)}
-                >
-                  <SelectTrigger className="col-span-2">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="light">Light</SelectItem>
-                    <SelectItem value="dark">Dark</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
               {/* Default Speed Percentage */}
               <div className="grid grid-cols-3 items-center gap-4">
                 <Label>Default Speed %</Label>
@@ -276,6 +342,223 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </div>
+            </div>
+          </Card>
+
+          {/* Robot Appearance */}
+          <Card className="p-6">
+            <h2 className="text-xl font-semibold mb-4">Robot Appearance</h2>
+            <div className="space-y-4">
+              {/* Hardware Robot Color */}
+              <div className="grid grid-cols-3 items-center gap-4">
+                <Label>Hardware Robot Color</Label>
+                <div className="col-span-2 flex gap-2 items-center">
+                  <Input
+                    type="color"
+                    value={localConfig.ui.hardware_robot.color}
+                    onChange={(e) =>
+                      updateConfig(['ui', 'hardware_robot', 'color'], e.target.value)
+                    }
+                    className="w-20 h-10 cursor-pointer"
+                  />
+                  <Input
+                    type="text"
+                    value={localConfig.ui.hardware_robot.color}
+                    onChange={(e) =>
+                      updateConfig(['ui', 'hardware_robot', 'color'], e.target.value)
+                    }
+                    className="flex-1"
+                    placeholder="#808080"
+                  />
+                </div>
+              </div>
+
+              {/* Hardware Robot Transparency */}
+              <div className="grid grid-cols-3 items-center gap-4">
+                <Label>Hardware Robot Transparency</Label>
+                <div className="col-span-2 flex gap-2 items-center">
+                  <Input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={localConfig.ui.hardware_robot.transparency}
+                    onChange={(e) =>
+                      updateConfig(['ui', 'hardware_robot', 'transparency'], parseFloat(e.target.value))
+                    }
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground w-12 text-right">
+                    {(localConfig.ui.hardware_robot.transparency * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+
+              {/* Commander Robot Color */}
+              <div className="grid grid-cols-3 items-center gap-4">
+                <Label>Commander Robot Color</Label>
+                <div className="col-span-2 flex gap-2 items-center">
+                  <Input
+                    type="color"
+                    value={localConfig.ui.commander_robot.color}
+                    onChange={(e) =>
+                      updateConfig(['ui', 'commander_robot', 'color'], e.target.value)
+                    }
+                    className="w-20 h-10 cursor-pointer"
+                  />
+                  <Input
+                    type="text"
+                    value={localConfig.ui.commander_robot.color}
+                    onChange={(e) =>
+                      updateConfig(['ui', 'commander_robot', 'color'], e.target.value)
+                    }
+                    className="flex-1"
+                    placeholder="#4ECDC4"
+                  />
+                </div>
+              </div>
+
+              {/* Commander Robot Transparency */}
+              <div className="grid grid-cols-3 items-center gap-4">
+                <Label>Commander Robot Transparency</Label>
+                <div className="col-span-2 flex gap-2 items-center">
+                  <Input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={localConfig.ui.commander_robot.transparency}
+                    onChange={(e) =>
+                      updateConfig(['ui', 'commander_robot', 'transparency'], parseFloat(e.target.value))
+                    }
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground w-12 text-right">
+                    {(localConfig.ui.commander_robot.transparency * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Saved Positions */}
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">Saved Positions</h2>
+              <Button onClick={handleAddPosition} size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Position
+              </Button>
+            </div>
+
+            {/* Position Editor Modal/Inline Form */}
+            {editingPosition && (
+              <div className="mb-4 p-4 border rounded-lg bg-muted/50">
+                <h3 className="font-semibold mb-3">{isAddingPosition ? 'Add New Position' : 'Edit Position'}</h3>
+                <div className="space-y-3">
+                  {/* Name Input */}
+                  <div>
+                    <Label className="text-sm">Position Name</Label>
+                    <Input
+                      value={editingPosition.name}
+                      onChange={(e) => setEditingPosition({ ...editingPosition, name: e.target.value })}
+                      placeholder="e.g., Home, Park, Ready"
+                      className="mt-1"
+                    />
+                  </div>
+
+                  {/* Joint Angles */}
+                  <div>
+                    <Label className="text-sm">Joint Angles (degrees)</Label>
+                    <div className="grid grid-cols-6 gap-2 mt-1">
+                      {editingPosition.joints.map((angle, index) => (
+                        <div key={index}>
+                          <Label className="text-xs text-muted-foreground">J{index + 1}</Label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            value={angle}
+                            onChange={(e) => {
+                              const newJoints = [...editingPosition.joints];
+                              newJoints[index] = parseFloat(e.target.value) || 0;
+                              setEditingPosition({ ...editingPosition, joints: newJoints });
+                            }}
+                            className="text-xs"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2 pt-2">
+                    <Button onClick={handleSavePosition} size="sm">
+                      Save
+                    </Button>
+                    <Button onClick={handleCancelEditPosition} variant="outline" size="sm">
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Positions Table */}
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="text-left p-2 font-semibold text-sm">Name</th>
+                    <th className="text-center p-2 font-semibold text-sm w-16">J1</th>
+                    <th className="text-center p-2 font-semibold text-sm w-16">J2</th>
+                    <th className="text-center p-2 font-semibold text-sm w-16">J3</th>
+                    <th className="text-center p-2 font-semibold text-sm w-16">J4</th>
+                    <th className="text-center p-2 font-semibold text-sm w-16">J5</th>
+                    <th className="text-center p-2 font-semibold text-sm w-16">J6</th>
+                    <th className="text-center p-2 font-semibold text-sm w-24">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {localConfig.ui.saved_positions.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="text-center p-4 text-muted-foreground text-sm">
+                        No saved positions. Click "Add Position" to create one.
+                      </td>
+                    </tr>
+                  ) : (
+                    localConfig.ui.saved_positions.map((position, index) => (
+                      <tr key={index} className="border-t hover:bg-muted/50">
+                        <td className="p-2 font-medium">{position.name}</td>
+                        {position.joints.map((angle, jointIndex) => (
+                          <td key={jointIndex} className="text-center p-2 text-sm font-mono">
+                            {angle.toFixed(1)}
+                          </td>
+                        ))}
+                        <td className="p-2">
+                          <div className="flex gap-1 justify-center">
+                            <Button
+                              onClick={() => handleEditPosition(index)}
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              onClick={() => handleDeletePosition(index)}
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </Card>
 

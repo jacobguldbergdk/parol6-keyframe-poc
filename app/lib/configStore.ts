@@ -38,13 +38,9 @@ interface TCPOffset {
   z: number;
 }
 
-interface JointColors {
-  J1: string;
-  J2: string;
-  J3: string;
-  J4: string;
-  J5: string;
-  J6: string;
+interface RobotAppearance {
+  color: string;
+  transparency: number;
 }
 
 interface SavedPosition {
@@ -53,14 +49,14 @@ interface SavedPosition {
 }
 
 interface UIConfig {
-  theme: string;
   default_speed_percentage: number;
   show_safety_warnings: boolean;
   step_angle: number;
   default_timeline_duration: number;
   default_fps: number;
   tcp_offset: TCPOffset;
-  joint_colors: JointColors;
+  hardware_robot: RobotAppearance;
+  commander_robot: RobotAppearance;
   saved_positions: SavedPosition[];
 }
 
@@ -125,7 +121,6 @@ const defaultConfig: Config = {
     initial_log_count: 100,
   },
   ui: {
-    theme: 'light',
     default_speed_percentage: 50,
     show_safety_warnings: true,
     step_angle: 1.0,
@@ -136,13 +131,13 @@ const defaultConfig: Config = {
       y: 0,
       z: -62,
     },
-    joint_colors: {
-      J1: '#FF6B6B',
-      J2: '#4ECDC4',
-      J3: '#45B7D1',
-      J4: '#FFA07A',
-      J5: '#98D8C8',
-      J6: '#F7DC6F',
+    hardware_robot: {
+      color: '#808080',
+      transparency: 0.35,
+    },
+    commander_robot: {
+      color: '#4ECDC4',
+      transparency: 1.0,
     },
     saved_positions: [
       { name: 'Home', joints: [90, -90, 180, 0, 0, 180] },

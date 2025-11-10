@@ -23,6 +23,13 @@ export default function TargetTCPVisualizer() {
   // Track last sent position to avoid unnecessary setState calls
   const lastPositionRef = useRef<CartesianPose | null>(null);
 
+  // Reusable objects to prevent memory leaks (don't create new objects every frame!)
+  const l6WorldPosition = useRef(new THREE.Vector3());
+  const l6WorldQuaternion = useRef(new THREE.Quaternion());
+  const localOffset = useRef(new THREE.Vector3());
+  const worldOffset = useRef(new THREE.Vector3());
+  const tcpWorldPosition = useRef(new THREE.Vector3());
+
   const targetRobotRef = useCommandStore((state) => state.targetRobotRef);
   const tcpOffset = useRobotConfigStore((state) => state.tcpOffset);
 
@@ -73,9 +80,19 @@ export default function TargetTCPVisualizer() {
     groupRef.current.add(zArrowRef.current);
 
     return () => {
-      if (xArrowRef.current) groupRef.current?.remove(xArrowRef.current);
-      if (yArrowRef.current) groupRef.current?.remove(yArrowRef.current);
-      if (zArrowRef.current) groupRef.current?.remove(zArrowRef.current);
+      // Properly dispose ArrowHelpers to free GPU memory
+      if (xArrowRef.current) {
+        groupRef.current?.remove(xArrowRef.current);
+        xArrowRef.current.dispose();
+      }
+      if (yArrowRef.current) {
+        groupRef.current?.remove(yArrowRef.current);
+        yArrowRef.current.dispose();
+      }
+      if (zArrowRef.current) {
+        groupRef.current?.remove(zArrowRef.current);
+        zArrowRef.current.dispose();
+      }
     };
   }, []);
 
@@ -94,21 +111,22 @@ export default function TargetTCPVisualizer() {
     const l6Link = targetRobotRef.links['L6'];
     if (l6Link) {
       l6Link.updateMatrixWorld(true);
-      const l6WorldPosition = new THREE.Vector3();
-      const l6WorldQuaternion = new THREE.Quaternion();
-      l6Link.getWorldPosition(l6WorldPosition);
-      l6Link.getWorldQuaternion(l6WorldQuaternion);
 
-      const localOffset = new THREE.Vector3(
+      // Reuse objects to prevent memory leaks (480 objects/sec → 0 objects/sec)
+      l6Link.getWorldPosition(l6WorldPosition.current);
+      l6Link.getWorldQuaternion(l6WorldQuaternion.current);
+
+      localOffset.current.set(
         tcpOffset.x / 1000,
         tcpOffset.y / 1000,
         tcpOffset.z / 1000
       );
-      const worldOffset = localOffset.applyQuaternion(l6WorldQuaternion);
-      const tcpWorldPosition = l6WorldPosition.add(worldOffset);
 
-      groupRef.current.position.copy(tcpWorldPosition);
-      groupRef.current.quaternion.copy(l6WorldQuaternion);
+      worldOffset.current.copy(localOffset.current).applyQuaternion(l6WorldQuaternion.current);
+      tcpWorldPosition.current.copy(l6WorldPosition.current).add(worldOffset.current);
+
+      groupRef.current.position.copy(tcpWorldPosition.current);
+      groupRef.current.quaternion.copy(l6WorldQuaternion.current);
     }
 
     // Store robot coordinates (Z-up) in store - only update if position changed
