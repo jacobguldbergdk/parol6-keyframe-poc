@@ -10,7 +10,9 @@ import RobotStatusPanel from '../components/RobotStatusPanel';
 import CommandLog from '../components/CommandLog';
 import { useConfigStore } from '../lib/configStore';
 import { useActualFollowsTarget } from '../hooks/useActualFollowsTarget';
-import { useTimelineStore } from '../lib/store';
+import { useTimelineStore } from '../lib/stores/timelineStore';
+import { useCommandStore } from '../lib/stores/commandStore';
+import { useInputStore } from '../lib/stores/inputStore';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { MotionMode } from '../lib/types';
 
@@ -21,7 +23,7 @@ export default function ControlPage() {
   // Get mode and related state
   const motionMode = useTimelineStore((state) => state.timeline.mode);
   const setMotionMode = useTimelineStore((state) => state.setMotionMode);
-  const targetTcpPosition = useTimelineStore((state) => state.targetTcpPosition);
+  const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
 
   // Track if we've synced the RGB gizmo for current cartesian session
   const hasSyncedRef = useRef(false);
@@ -36,15 +38,15 @@ export default function ControlPage() {
   // Auto-sync cartesian pose to robot TCP when switching to cartesian mode
   // Only runs ONCE per cartesian session to prevent feedback loop
   useEffect(() => {
-    if (motionMode === 'cartesian' && targetTcpPosition && !hasSyncedRef.current) {
-      useTimelineStore.setState({
-        currentCartesianPose: {
-          X: targetTcpPosition.X,
-          Y: targetTcpPosition.Y,
-          Z: targetTcpPosition.Z,
-          RX: targetTcpPosition.RX,
-          RY: targetTcpPosition.RY,
-          RZ: targetTcpPosition.RZ
+    if (motionMode === 'cartesian' && commandedTcpPose && !hasSyncedRef.current) {
+      useInputStore.setState({
+        inputCartesianPose: {
+          X: commandedTcpPose.X,
+          Y: commandedTcpPose.Y,
+          Z: commandedTcpPose.Z,
+          RX: commandedTcpPose.RX,
+          RY: commandedTcpPose.RY,
+          RZ: commandedTcpPose.RZ
         }
       });
       hasSyncedRef.current = true;
@@ -54,7 +56,7 @@ export default function ControlPage() {
     if (motionMode !== 'cartesian') {
       hasSyncedRef.current = false;
     }
-  }, [motionMode, targetTcpPosition]);
+  }, [motionMode, commandedTcpPose]);
 
   // Handle mode change
   const handleModeChange = (newMode: string) => {

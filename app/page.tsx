@@ -10,7 +10,10 @@ import ControlOptions from './components/ControlOptions';
 import { usePlayback } from './hooks/usePlayback';
 import { useScrubbing } from './hooks/useScrubbing';
 import { useActualFollowsTarget } from './hooks/useActualFollowsTarget';
-import { useTimelineStore } from './lib/store';
+import { useTimelineStore } from './lib/stores/timelineStore';
+import { useRobotConfigStore } from './lib/stores/robotConfigStore';
+import { useCommandStore } from './lib/stores/commandStore';
+import { useInputStore } from './lib/stores/inputStore';
 import { useConfigStore } from './lib/configStore';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -32,8 +35,8 @@ export default function Home() {
   const loadTimeline = useTimelineStore((state) => state.loadTimeline);
   const motionMode = useTimelineStore((state) => state.timeline.mode);
   const setMotionMode = useTimelineStore((state) => state.setMotionMode);
-  const setTcpOffset = useTimelineStore((state) => state.setTcpOffset);
-  const targetTcpPosition = useTimelineStore((state) => state.targetTcpPosition);
+  const setTcpOffset = useRobotConfigStore((state) => state.setTcpOffset);
+  const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
 
   // Track if we've synced the RGB gizmo for current cartesian session
   const hasSyncedRef = useRef(false);
@@ -60,15 +63,15 @@ export default function Home() {
   // Auto-sync cartesian pose to robot TCP when switching to cartesian mode
   // Only runs ONCE per cartesian session to prevent feedback loop
   useEffect(() => {
-    if (motionMode === 'cartesian' && targetTcpPosition && !hasSyncedRef.current) {
-      useTimelineStore.setState({
-        currentCartesianPose: {
-          X: targetTcpPosition.X,
-          Y: targetTcpPosition.Y,
-          Z: targetTcpPosition.Z,
-          RX: targetTcpPosition.RX,
-          RY: targetTcpPosition.RY,
-          RZ: targetTcpPosition.RZ
+    if (motionMode === 'cartesian' && commandedTcpPose && !hasSyncedRef.current) {
+      useInputStore.setState({
+        inputCartesianPose: {
+          X: commandedTcpPose.X,
+          Y: commandedTcpPose.Y,
+          Z: commandedTcpPose.Z,
+          RX: commandedTcpPose.RX,
+          RY: commandedTcpPose.RY,
+          RZ: commandedTcpPose.RZ
         }
       });
       hasSyncedRef.current = true;
@@ -78,7 +81,7 @@ export default function Home() {
     if (motionMode !== 'cartesian') {
       hasSyncedRef.current = false;
     }
-  }, [motionMode, targetTcpPosition]);
+  }, [motionMode, commandedTcpPose]);
 
   const handleModeChange = (value: string) => {
     const newMode = value as MotionMode;
