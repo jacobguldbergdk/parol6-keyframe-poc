@@ -277,6 +277,21 @@ export default function SettingsPage() {
                 />
               </div>
 
+              {/* Default Acceleration Percentage */}
+              <div className="grid grid-cols-3 items-center gap-4">
+                <Label>Default Accel %</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={localConfig.ui.default_acceleration_percentage}
+                  onChange={(e) =>
+                    updateConfig(['ui', 'default_acceleration_percentage'], parseInt(e.target.value))
+                  }
+                  className="col-span-2"
+                />
+              </div>
+
               {/* Step Angle */}
               <div className="grid grid-cols-3 items-center gap-4">
                 <Label>Step Angle (degrees)</Label>

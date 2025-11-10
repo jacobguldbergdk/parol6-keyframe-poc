@@ -50,6 +50,7 @@ interface SavedPosition {
 
 interface UIConfig {
   default_speed_percentage: number;
+  default_acceleration_percentage: number;
   show_safety_warnings: boolean;
   step_angle: number;
   default_timeline_duration: number;
@@ -122,6 +123,7 @@ const defaultConfig: Config = {
   },
   ui: {
     default_speed_percentage: 50,
+    default_acceleration_percentage: 60,
     show_safety_warnings: true,
     step_angle: 1.0,
     default_timeline_duration: 10,
@@ -184,6 +186,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
   saveConfig: async (updates: Partial<Config>) => {
     set({ isLoading: true, error: null });
     try {
+      const currentConfig = get().config;
       const response = await fetch(`${getApiBaseUrl()}/api/config`, {
         method: 'PATCH',
         headers: {
@@ -194,8 +197,14 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
       if (!response.ok) {
         throw new Error(`Failed to save config: ${response.statusText}`);
       }
-      const config = await response.json();
-      set({ config, isLoading: false });
+      const responseData = await response.json();
+      const backendConfig = responseData.config; // Extract config from {message, config} response
+      // Preserve frontend config from current state (not saved to backend)
+      const mergedConfig = {
+        ...backendConfig,
+        frontend: currentConfig?.frontend || defaultConfig.frontend
+      };
+      set({ config: mergedConfig, isLoading: false });
     } catch (error) {
       console.error('Error saving config:', error);
       set({

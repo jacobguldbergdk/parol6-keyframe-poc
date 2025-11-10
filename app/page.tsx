@@ -41,6 +41,7 @@ export default function Home() {
   const setCommanderRobotColor = useRobotConfigStore((state) => state.setCommanderRobotColor);
   const setCommanderRobotTransparency = useRobotConfigStore((state) => state.setCommanderRobotTransparency);
   const setSpeed = useCommandStore((state) => state.setSpeed);
+  const setAccel = useCommandStore((state) => state.setAccel);
   const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
 
   // Track if we've synced the RGB gizmo for current cartesian session
@@ -71,6 +72,13 @@ export default function Home() {
       setSpeed(config.ui.default_speed_percentage);
     }
   }, [config, setSpeed]);
+
+  // Sync default_acceleration_percentage from config to commandStore when config loads
+  useEffect(() => {
+    if (config?.ui?.default_acceleration_percentage !== undefined) {
+      setAccel(config.ui.default_acceleration_percentage);
+    }
+  }, [config, setAccel]);
 
   // Sync robot appearance from config to robotConfigStore when config loads
   useEffect(() => {

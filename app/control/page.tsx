@@ -24,6 +24,7 @@ export default function ControlPage() {
   const motionMode = useTimelineStore((state) => state.timeline.mode);
   const setMotionMode = useTimelineStore((state) => state.setMotionMode);
   const setSpeed = useCommandStore((state) => state.setSpeed);
+  const setAccel = useCommandStore((state) => state.setAccel);
   const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
 
   // Track if we've synced the RGB gizmo for current cartesian session
@@ -39,6 +40,13 @@ export default function ControlPage() {
       setSpeed(config.ui.default_speed_percentage);
     }
   }, [config, setSpeed]);
+
+  // Sync default_acceleration_percentage from config to commandStore when config loads
+  useEffect(() => {
+    if (config?.ui?.default_acceleration_percentage !== undefined) {
+      setAccel(config.ui.default_acceleration_percentage);
+    }
+  }, [config, setAccel]);
 
   // Enable live control mode - automatically sends move commands when target changes
   useActualFollowsTarget();
