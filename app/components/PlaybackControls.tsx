@@ -1,6 +1,7 @@
 'use client';
 
-import { useTimelineStore } from '@/app/lib/store';
+import { useTimelineStore } from '@/app/lib/stores/timelineStore';
+import { useCommandStore } from '@/app/lib/stores/commandStore';
 import { Button } from '@/components/ui/button';
 import { Play, Pause, Square, Circle } from 'lucide-react';
 
@@ -8,10 +9,24 @@ export default function PlaybackControls() {
   const isPlaying = useTimelineStore((state) => state.playbackState.isPlaying);
   const currentTime = useTimelineStore((state) => state.playbackState.currentTime);
   const duration = useTimelineStore((state) => state.timeline.duration);
+  const motionMode = useTimelineStore((state) => state.timeline.mode);
   const play = useTimelineStore((state) => state.play);
   const pause = useTimelineStore((state) => state.pause);
   const stop = useTimelineStore((state) => state.stop);
-  const recordWaypoint = useTimelineStore((state) => state.recordWaypoint);
+  const recordKeyframes = useTimelineStore((state) => state.recordKeyframes);
+  const recordCartesianKeyframes = useTimelineStore((state) => state.recordCartesianKeyframes);
+
+  // Get commanded state for recording
+  const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
+  const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
+
+  const handleRecord = () => {
+    if (motionMode === 'joint') {
+      recordKeyframes(commandedJointAngles);
+    } else if (commandedTcpPose) {
+      recordCartesianKeyframes(commandedTcpPose);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -41,7 +56,7 @@ export default function PlaybackControls() {
 
       {/* Record Waypoint */}
       <Button
-        onClick={recordWaypoint}
+        onClick={handleRecord}
         variant="default"
         size="sm"
         className="w-full"

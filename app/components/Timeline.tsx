@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useTimelineStore } from '@/app/lib/store';
+import { useTimelineStore } from '@/app/lib/stores/timelineStore';
+import { useCommandStore } from '@/app/lib/stores/commandStore';
 import { JOINT_NAMES, JOINT_COLORS, CARTESIAN_AXES } from '@/app/lib/constants';
 import { usePrePlaybackPosition } from '@/app/hooks/usePrePlaybackPosition';
 
@@ -270,14 +271,18 @@ export default function Timeline() {
   const recordKeyframes = useTimelineStore((state) => state.recordKeyframes);
   const recordCartesianKeyframes = useTimelineStore((state) => state.recordCartesianKeyframes);
 
+  // Get commanded state for recording
+  const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
+  const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
+
   // Pre-playback positioning hook
   const { moveToStartAndPlay, isMovingToStart, moveError, clearError } = usePrePlaybackPosition();
 
   const handleRecord = () => {
     if (motionMode === 'joint') {
-      recordKeyframes();
-    } else {
-      recordCartesianKeyframes();
+      recordKeyframes(commandedJointAngles);
+    } else if (commandedTcpPose) {
+      recordCartesianKeyframes(commandedTcpPose);
     }
   };
 
