@@ -18,6 +18,7 @@ export interface InputStore {
   // UI state
   selectedJoint: JointName | null;
   stepAngle: number;
+  cartesianPositionStep: number;
   showTargetRobot: boolean;
   showHardwareRobot: boolean;  // Renamed from showActualRobot
 
@@ -26,6 +27,7 @@ export interface InputStore {
   setInputCartesianValue: (axis: keyof CartesianPose, value: number) => void;
   setSelectedJoint: (joint: JointName | null) => void;
   setStepAngle: (angle: number) => void;
+  setCartesianPositionStep: (step: number) => void;
   setShowTargetRobot: (show: boolean) => void;
   setShowHardwareRobot: (show: boolean) => void;
 }
@@ -44,6 +46,7 @@ export const useInputStore = create<InputStore>((set) => ({
 
   selectedJoint: null,
   stepAngle: 1.0,
+  cartesianPositionStep: 1,
   showTargetRobot: true,
   showHardwareRobot: true,
 
@@ -70,6 +73,7 @@ export const useInputStore = create<InputStore>((set) => ({
 
   setSelectedJoint: (joint) => set({ selectedJoint: joint }),
   setStepAngle: (angle) => set({ stepAngle: angle }),
+  setCartesianPositionStep: (step) => set({ cartesianPositionStep: step }),
   setShowTargetRobot: (show) => set({ showTargetRobot: show }),
   setShowHardwareRobot: (show) => set({ showHardwareRobot: show })
 }));

@@ -53,6 +53,7 @@ interface UIConfig {
   default_acceleration_percentage: number;
   show_safety_warnings: boolean;
   step_angle: number;
+  cartesian_position_step_mm: number;
   default_timeline_duration: number;
   default_fps: number;
   tcp_offset: TCPOffset;
@@ -126,6 +127,7 @@ const defaultConfig: Config = {
     default_acceleration_percentage: 60,
     show_safety_warnings: true,
     step_angle: 1.0,
+    cartesian_position_step_mm: 1,
     default_timeline_duration: 10,
     default_fps: 60,
     tcp_offset: {

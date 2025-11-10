@@ -308,6 +308,22 @@ export default function SettingsPage() {
                 />
               </div>
 
+              {/* Cartesian Position Step */}
+              <div className="grid grid-cols-3 items-center gap-4">
+                <Label>Cartesian Position Step (mm)</Label>
+                <Input
+                  type="number"
+                  min="0.1"
+                  max="100"
+                  step="0.1"
+                  value={localConfig.ui.cartesian_position_step_mm}
+                  onChange={(e) =>
+                    updateConfig(['ui', 'cartesian_position_step_mm'], parseFloat(e.target.value))
+                  }
+                  className="col-span-2"
+                />
+              </div>
+
               {/* Show Safety Warnings */}
               <div className="grid grid-cols-3 items-center gap-4">
                 <Label>Show Safety Warnings</Label>

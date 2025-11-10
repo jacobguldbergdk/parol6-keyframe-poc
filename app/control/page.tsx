@@ -25,6 +25,8 @@ export default function ControlPage() {
   const setMotionMode = useTimelineStore((state) => state.setMotionMode);
   const setSpeed = useCommandStore((state) => state.setSpeed);
   const setAccel = useCommandStore((state) => state.setAccel);
+  const setStepAngle = useInputStore((state) => state.setStepAngle);
+  const setCartesianPositionStep = useInputStore((state) => state.setCartesianPositionStep);
   const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
 
   // Track if we've synced the RGB gizmo for current cartesian session
@@ -47,6 +49,20 @@ export default function ControlPage() {
       setAccel(config.ui.default_acceleration_percentage);
     }
   }, [config, setAccel]);
+
+  // Sync step_angle from config to inputStore when config loads
+  useEffect(() => {
+    if (config?.ui?.step_angle !== undefined) {
+      setStepAngle(config.ui.step_angle);
+    }
+  }, [config, setStepAngle]);
+
+  // Sync cartesian_position_step_mm from config to inputStore when config loads
+  useEffect(() => {
+    if (config?.ui?.cartesian_position_step_mm !== undefined) {
+      setCartesianPositionStep(config.ui.cartesian_position_step_mm);
+    }
+  }, [config, setCartesianPositionStep]);
 
   // Enable live control mode - automatically sends move commands when target changes
   useActualFollowsTarget();
@@ -94,8 +110,8 @@ export default function ControlPage() {
             <RobotViewer />
           </div>
 
-          {/* Control Panels Column - Fixed 600px width */}
-          <div className="w-[600px] flex-shrink-0 flex flex-col gap-4">
+          {/* Control Panels Column - Fixed 300px width, vertical stack */}
+          <div className="w-[300px] flex-shrink-0 flex flex-col gap-4">
             {/* Mode Toggle */}
             <div className="bg-card rounded-lg border p-3 flex items-center gap-3">
               <span className="text-sm font-semibold text-muted-foreground">Motion Mode:</span>
@@ -109,28 +125,25 @@ export default function ControlPage() {
               </ToggleGroup>
             </div>
 
-            {/* Row 1: Control Sliders (300px) + Options (300px) */}
-            <div className="flex gap-4 h-[55%]">
-              {/* Control Sliders - Fixed 300px - Conditional rendering based on mode */}
-              <div className="w-[300px] flex-shrink-0">
-                {motionMode === 'joint' ? (
-                  <CompactJointSliders />
-                ) : (
-                  <div className="bg-card rounded-lg border p-4 h-full overflow-y-auto">
-                    <h2 className="text-sm font-semibold mb-4">Cartesian Control</h2>
-                    <CartesianSliders />
-                  </div>
-                )}
-              </div>
-
-              {/* Control Options - Fixed 300px */}
-              <div className="w-[300px] flex-shrink-0">
-                <ControlOptions />
-              </div>
+            {/* Control Sliders - Auto height */}
+            <div className="flex-shrink-0">
+              {motionMode === 'joint' ? (
+                <CompactJointSliders />
+              ) : (
+                <div className="bg-card rounded-lg border p-4">
+                  <h2 className="text-sm font-semibold mb-4">Cartesian Control</h2>
+                  <CartesianSliders />
+                </div>
+              )}
             </div>
 
-            {/* Row 2: Robot Status - Full 600px width */}
-            <div className="flex-1 min-h-0">
+            {/* Control Options - Auto height */}
+            <div className="flex-shrink-0">
+              <ControlOptions />
+            </div>
+
+            {/* Robot Status - Fixed 300px height */}
+            <div className="h-[300px] flex-shrink-0">
               <RobotStatusPanel />
             </div>
           </div>

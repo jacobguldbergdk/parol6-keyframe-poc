@@ -16,17 +16,26 @@ import { MemoryMonitor, WebGLContextMonitor } from './MemoryMonitor';
 import { JOINT_LIMITS, JOINT_ANGLE_OFFSETS, CARTESIAN_LIMITS } from '../lib/constants';
 import type { JointName, CartesianAxis } from '../lib/types';
 import { inverseKinematicsDetailed } from '../lib/kinematics';
-import { getHomePosition } from '../lib/positions';
+import { getHomePosition, getAllPositions } from '../lib/positions';
 import { getApiBaseUrl } from '../lib/apiConfig';
+import { moveJoints } from '../lib/api';
+import { useSafetyConfirmation } from '../hooks/useSafetyConfirmation';
+import { calculateTcpPoseFromUrdf } from '../lib/tcpCalculations';
+import { threeJsToRobot } from '../lib/coordinateTransform';
+import { Button } from '@/components/ui/button';
 
 // @ts-ignore - urdf-loader doesn't have proper types
 import URDFLoader from 'urdf-loader';
 
 interface URDFRobotProps {
   showLabels: boolean;
+  hardwareRobotColor: string;
+  hardwareRobotTransparency: number;
+  commanderRobotColor: string;
+  commanderRobotTransparency: number;
 }
 
-function URDFRobot({ showLabels }: URDFRobotProps) {
+function URDFRobot({ showLabels, hardwareRobotColor, hardwareRobotTransparency, commanderRobotColor, commanderRobotTransparency }: URDFRobotProps) {
   const robotRef = useRef<any>(null);
   const hardwareRobotRef = useRef<any>(null);
   const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
@@ -381,13 +390,70 @@ export default function RobotViewer() {
   const commanderRobotColor = useRobotConfigStore((state) => state.commanderRobotColor);
   const commanderRobotTransparency = useRobotConfigStore((state) => state.commanderRobotTransparency);
 
-  // Step angle for keyboard controls (degrees)
-  const stepAngle = 5;
+  // Safety confirmation hook
+  const { confirmAction, SafetyDialog } = useSafetyConfirmation();
+
+  // Step angles for keyboard controls
+  const stepAngle = useInputStore((state) => state.stepAngle);
+  const cartesianPositionStep = useInputStore((state) => state.cartesianPositionStep);
 
   const [showLabels, setShowLabels] = useState(true);
 
+  // Get all saved positions from config
+  const savedPositions = getAllPositions();
+
   // Track last valid cartesian pose for IK failure recovery
   const lastValidCartesianPose = useRef(inputCartesianPose);
+
+  // Handle going to a preset position
+  const handleGoToPosition = async (joints: { J1: number; J2: number; J3: number; J4: number; J5: number; J6: number }, presetName: string) => {
+    // Safety confirmation check
+    const confirmed = await confirmAction(
+      `Move robot to "${presetName}" preset position?`,
+      'Confirm Preset Movement'
+    );
+    if (!confirmed) return;
+
+    // Set both input and commanded joint positions
+    Object.entries(joints).forEach(([joint, angle]) => {
+      setInputJointAngle(joint as any, angle);
+      setCommandedJointAngle(joint as any, angle);
+    });
+
+    // If in cartesian mode, also update cartesian input sliders and RGB gizmo
+    // to match the FK of the joint angles
+    if (motionMode === 'cartesian' && targetRobotRef) {
+      // Apply joint angles to URDF robot (same logic as kinematics.ts)
+      const angleSigns = [1, 1, -1, -1, -1, -1];
+      const jointNames = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6'] as const;
+
+      jointNames.forEach((joint, index) => {
+        const angleDeg = joints[joint];
+        const sign = angleSigns[index];
+        const offset = JOINT_ANGLE_OFFSETS[index];
+        const correctedAngleDeg = angleDeg * sign + offset;
+        const angleRad = (correctedAngleDeg * Math.PI) / 180;
+        const linkName = `L${index + 1}`;
+        targetRobotRef.setJointValue(linkName, angleRad);
+      });
+
+      // Calculate FK to get cartesian position
+      const threeJsPose = calculateTcpPoseFromUrdf(targetRobotRef, tcpOffset);
+
+      if (threeJsPose) {
+        // Convert Three.js coords to robot coords
+        const robotPose = threeJsToRobot(threeJsPose);
+
+        // Update cartesian input sliders to match
+        setInputCartesianValue('X', robotPose.X);
+        setInputCartesianValue('Y', robotPose.Y);
+        setInputCartesianValue('Z', robotPose.Z);
+        setInputCartesianValue('RX', robotPose.RX);
+        setInputCartesianValue('RY', robotPose.RY);
+        setInputCartesianValue('RZ', robotPose.RZ);
+      }
+    }
+  };
 
   // Keyboard controls for joint adjustment
   useEffect(() => {
@@ -407,8 +473,8 @@ export default function RobotViewer() {
         return;
       }
 
-      // Handle number keys 1-6 to select joints J1-J6
-      if (event.key >= '1' && event.key <= '6') {
+      // Handle number keys 1-6 to select joints J1-J6 (but not Alt+number for presets)
+      if (event.key >= '1' && event.key <= '6' && !event.altKey) {
         const jointNumber = parseInt(event.key);
         const jointName = `J${jointNumber}` as JointName;
         setSelectedJoint(jointName);
@@ -428,8 +494,8 @@ export default function RobotViewer() {
           // Shift: fine control (step / 10)
           adjustmentStep = stepAngle / 10;
         } else if (event.ctrlKey || event.metaKey) {
-          // Ctrl/Cmd: coarse control (step × 3)
-          adjustmentStep = stepAngle * 3;
+          // Ctrl/Cmd: coarse control (step × 5)
+          adjustmentStep = stepAngle * 5;
         }
 
         // Apply direction
@@ -503,22 +569,22 @@ export default function RobotViewer() {
       let step: number;
 
       if (isRotationAxis) {
-        // Rotation steps in degrees
+        // Rotation steps in degrees (from step_angle setting)
         if (event.shiftKey) {
-          step = 0.5; // Fine
+          step = stepAngle / 10; // Fine
         } else if (event.ctrlKey || event.metaKey) {
-          step = 25; // Coarse
+          step = stepAngle * 5; // Coarse
         } else {
-          step = 5; // Normal
+          step = stepAngle; // Normal
         }
       } else {
-        // Position steps in mm
+        // Position steps in mm (from cartesian_position_step_mm setting)
         if (event.shiftKey) {
-          step = 0.5; // Fine
+          step = cartesianPositionStep / 10; // Fine
         } else if (event.ctrlKey || event.metaKey) {
-          step = 25; // Coarse
+          step = cartesianPositionStep * 5; // Coarse
         } else {
-          step = 5; // Normal
+          step = cartesianPositionStep; // Normal
         }
       }
 
@@ -574,6 +640,76 @@ export default function RobotViewer() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [motionMode, inputCartesianPose, commandedJointAngles, setInputCartesianValue, setCommandedJointAngles, targetRobotRef, tcpOffset, ikAxisMask]);
+
+  // Spacebar shortcut: Move to Target (Joint) with safety confirmation
+  useEffect(() => {
+    const handleKeyDown = async (event: KeyboardEvent) => {
+      // Ignore keyboard events when typing in input fields
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        (event.target as HTMLElement).isContentEditable
+      ) {
+        return;
+      }
+
+      // Handle spacebar key
+      if (event.key === ' ' || event.code === 'Space') {
+        event.preventDefault(); // Prevent page scrolling
+
+        // Safety confirmation check
+        const confirmed = await confirmAction(
+          'Move robot to target position using joint space motion?',
+          'Confirm Joint Movement'
+        );
+        if (!confirmed) return;
+
+        // Execute joint movement
+        try {
+          const result = await moveJoints(commandedJointAngles, speed);
+          if (!result.success) {
+            alert(`Failed to move robot (joint): ${result.error || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error('Error moving robot (joint):', error);
+          alert('Failed to communicate with robot');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [commandedJointAngles, speed, confirmAction]);
+
+  // Alt+number shortcuts: Go to preset positions
+  useEffect(() => {
+    const handleKeyDown = async (event: KeyboardEvent) => {
+      // Ignore keyboard events when typing in input fields
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        (event.target as HTMLElement).isContentEditable
+      ) {
+        return;
+      }
+
+      // Handle Alt+number keys for preset positions
+      if (event.altKey && event.key >= '1' && event.key <= '9') {
+        event.preventDefault(); // Prevent browser shortcuts
+
+        const presetIndex = parseInt(event.key) - 1; // Convert to 0-based index
+
+        // Check if preset exists
+        if (presetIndex < savedPositions.length) {
+          const position = savedPositions[presetIndex];
+          await handleGoToPosition(position.joints, position.name);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [savedPositions, handleGoToPosition]);
 
   // Teach Mode: Mirror hardware feedback in input (teaching mode - input follows hardware)
   useEffect(() => {
@@ -775,19 +911,47 @@ export default function RobotViewer() {
         </div>
       </div>
 
+      {/* Target Preset Buttons - Bottom Left */}
+      {savedPositions.length > 0 && (
+        <div className="absolute bottom-4 left-4 bg-black/70 text-white p-3 rounded-lg text-xs z-10 backdrop-blur-sm">
+          <div className="font-semibold mb-2">Target Presets</div>
+          <div className="flex flex-col gap-1.5">
+            {savedPositions.map((position, index) => (
+              <Button
+                key={position.name}
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs justify-start hover:bg-white/10"
+                onClick={() => handleGoToPosition(position.joints, position.name)}
+              >
+                <span className="font-mono mr-2 text-gray-400">{index + 1}.</span>
+                {position.name}
+                <span className="ml-auto text-[9px] text-gray-500">Alt+{index + 1}</span>
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <Canvas camera={{ position: [0.5, 0.4, 0.8], fov: 50 }} onPointerMissed={handleCanvasClick}>
         <ambientLight intensity={0.5} />
         <directionalLight position={[10, 10, 5]} intensity={1} />
         <Suspense fallback={null}>
-          <URDFRobot showLabels={showLabels} />
+          <URDFRobot
+            showLabels={showLabels}
+            hardwareRobotColor={hardwareRobotColor}
+            hardwareRobotTransparency={hardwareRobotTransparency}
+            commanderRobotColor={commanderRobotColor}
+            commanderRobotTransparency={commanderRobotTransparency}
+          />
 
           {/* Target TCP visualizer (orange/cyan/magenta) - shows commanded position from target robot */}
           {/* NOTE: NO rotation applied - gets world position directly from URDF */}
-          <TargetTCPVisualizer />
+          {showTargetRobot && <TargetTCPVisualizer />}
 
           {/* Actual TCP visualizer (yellow/lime/purple) - shows hardware feedback from actual robot */}
           {/* NOTE: NO rotation applied - gets world position directly from URDF */}
-          <ActualTCPVisualizer />
+          {showHardwareRobot && <ActualTCPVisualizer />}
 
           {/* Cartesian input gizmo (red/green/blue) - only in cartesian mode */}
           {/* Shows user's cartesian slider input - where they WANT to command the robot */}
@@ -809,6 +973,9 @@ export default function RobotViewer() {
           </group>
         </GizmoHelper>
       </Canvas>
+
+      {/* Safety confirmation dialog */}
+      <SafetyDialog />
     </div>
   );
 }

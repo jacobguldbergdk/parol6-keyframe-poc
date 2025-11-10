@@ -21,8 +21,8 @@ export default function CompactJointSliders() {
   // Hardware store: Get actual values from hardware feedback
   const hardwareJointAngles = useHardwareStore((state) => state.hardwareJointAngles) || inputJointAngles;
 
-  // Step angle for increment/decrement buttons (degrees)
-  const stepAngle = 5;
+  // Step angle for increment/decrement buttons (from settings)
+  const stepAngle = useInputStore((state) => state.stepAngle);
 
   const handleStepJoint = (joint: JointName, direction: number) => {
     const currentValue = inputJointAngles[joint];
@@ -35,7 +35,7 @@ export default function CompactJointSliders() {
   };
 
   return (
-    <Card className="p-3 h-full flex flex-col">
+    <Card className="p-3">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold">Joint Control</h2>
         {liveControlEnabled && (
@@ -51,7 +51,7 @@ export default function CompactJointSliders() {
       </div>
 
       {/* Joint Sliders - Compact */}
-      <div className="flex-1 overflow-y-auto space-y-2">
+      <div className="space-y-2">
         {JOINT_NAMES.map((joint) => {
           const limits = JOINT_LIMITS[joint];
           const inputValue = inputJointAngles[joint];
