@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { useTimelineStore } from '@/app/lib/store';
+import { useTimelineStore } from '@/app/lib/stores/timelineStore';
+import { useCommandStore } from '@/app/lib/stores/commandStore';
+import { useRobotConfigStore } from '@/app/lib/stores/robotConfigStore';
+import { useInputStore } from '@/app/lib/stores/inputStore';
 import { getJointAnglesAtTime, getCartesianPoseAtTime } from '@/app/lib/interpolation';
 import { inverseKinematicsDetailed } from '@/app/lib/kinematics';
 import { DEFAULT_FPS } from '@/app/lib/constants';
@@ -17,10 +20,10 @@ export function usePlayback() {
   const motionMode = useTimelineStore((state) => state.timeline.mode);
   const keyframes = useTimelineStore((state) => state.timeline.keyframes);
   const cartesianKeyframes = useTimelineStore((state) => state.timeline.cartesianKeyframes);
-  const currentJointAngles = useTimelineStore((state) => state.currentJointAngles);
-  const targetRobotRef = useTimelineStore((state) => state.targetRobotRef);
-  const tcpOffset = useTimelineStore((state) => state.tcpOffset);
-  const ikAxisMask = useTimelineStore((state) => state.ikAxisMask);
+  const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
+  const targetRobotRef = useCommandStore((state) => state.targetRobotRef);
+  const tcpOffset = useRobotConfigStore((state) => state.tcpOffset);
+  const ikAxisMask = useRobotConfigStore((state) => state.ikAxisMask);
   const setCurrentTime = useTimelineStore((state) => state.setCurrentTime);
   const stop = useTimelineStore((state) => state.stop);
 
@@ -83,21 +86,21 @@ export function usePlayback() {
         // Joint mode: Interpolate joint angles directly
         const interpolatedAngles = getJointAnglesAtTime(keyframes, elapsed);
 
-        useTimelineStore.setState({ currentJointAngles: interpolatedAngles });
+        useCommandStore.setState({ commandedJointAngles: interpolatedAngles });
       } else {
         // Cartesian mode: Interpolate pose, then compute IK
         const interpolatedPose = getCartesianPoseAtTime(cartesianKeyframes, elapsed);
 
         // Update cartesian pose for target visualizer
-        useTimelineStore.setState({
-          currentCartesianPose: interpolatedPose
+        useInputStore.setState({
+          inputCartesianPose: interpolatedPose
         });
 
         // Compute IK to update robot position (same as manual button)
         if (targetRobotRef) {
           const ikResult = inverseKinematicsDetailed(
             interpolatedPose,
-            currentJointAngles,
+            commandedJointAngles,
             targetRobotRef,
             tcpOffset,
             ikAxisMask
@@ -105,7 +108,7 @@ export function usePlayback() {
 
           if (ikResult.success && ikResult.jointAngles) {
             // IK succeeded - update robot joint angles
-            useTimelineStore.setState({ currentJointAngles: ikResult.jointAngles });
+            useCommandStore.setState({ commandedJointAngles: ikResult.jointAngles });
           }
         }
       }

@@ -6,7 +6,8 @@
  */
 
 import { useState, useRef } from 'react';
-import { useTimelineStore } from '../lib/store';
+import { useTimelineStore } from '../lib/stores/timelineStore';
+import { useHardwareStore } from '../lib/stores/hardwareStore';
 import { JointAngles } from '../lib/types';
 import { moveJoints } from '../lib/api';
 import { getJointAnglesAtTime } from '../lib/interpolation';
@@ -33,7 +34,7 @@ export function usePrePlaybackPosition() {
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const actualJointAngles = useTimelineStore((state) => state.actualJointAngles);
+  const hardwareJointAngles = useHardwareStore((state) => state.hardwareJointAngles);
   const keyframes = useTimelineStore((state) => state.timeline.keyframes);
   const motionMode = useTimelineStore((state) => state.timeline.mode);
   const play = useTimelineStore((state) => state.play);
@@ -64,7 +65,7 @@ export function usePrePlaybackPosition() {
     }
 
     // Check if robot is connected
-    if (!actualJointAngles) {
+    if (!hardwareJointAngles) {
       console.error('[PrePlayback] Robot not connected - cannot execute playback');
       setMoveError('Robot not connected. Please connect robot before executing playback.');
       return;
@@ -80,7 +81,7 @@ export function usePrePlaybackPosition() {
     const targetPosition = getJointAnglesAtTime(keyframes, 0);
 
     // Check if already at position
-    if (isAtPosition(actualJointAngles, targetPosition, POSITION_TOLERANCE_DEGREES)) {
+    if (isAtPosition(hardwareJointAngles, targetPosition, POSITION_TOLERANCE_DEGREES)) {
       play(true);
       return;
     }
@@ -113,7 +114,7 @@ export function usePrePlaybackPosition() {
 
         // Poll actual position
         pollIntervalRef.current = setInterval(() => {
-          const currentActual = useTimelineStore.getState().actualJointAngles;
+          const currentActual = useHardwareStore.getState().hardwareJointAngles;
 
           if (!currentActual) {
             clearTimers();
