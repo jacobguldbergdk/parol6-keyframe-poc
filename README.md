@@ -66,6 +66,35 @@ The PAROL6 Timeline Editor is a Next.js-based web application that provides an i
 
 ---
 
+## State Management Architecture
+
+The frontend uses a **5-store architecture** with Zustand for clean separation of concerns:
+
+```
+User Input → Input Store → Command Store → API → Hardware
+                                              ↓
+                                     Hardware Store (via WebSocket)
+```
+
+| Store | Purpose | Key Data |
+|-------|---------|----------|
+| **inputStore** | Raw UI input | Slider values, UI preferences |
+| **commandStore** | Robot commands | Commanded joints/TCP, speed, modes |
+| **hardwareStore** | Hardware feedback | Actual joints/TCP, I/O, status |
+| **timelineStore** | Timeline editing | Keyframes, playback state |
+| **robotConfigStore** | Configuration | TCP offset, IK axis mask |
+
+### Key Principles
+
+- **Clear naming:** `input*`, `commanded*`, `hardware*` prefixes indicate data source
+- **Unidirectional flow:** Input → Command → Hardware (no circular dependencies)
+- **Component coordination:** Components orchestrate cross-store updates
+- **WebSocket isolation:** Only WebSocket updates hardwareStore
+
+📖 **See** [STORE_ARCHITECTURE.md](STORE_ARCHITECTURE.md) for detailed architecture diagrams and naming conventions.
+
+---
+
 ## Getting Started
 
 ### Prerequisites
@@ -207,9 +236,15 @@ parol-timeline-poc/
 │   │   ├── usePlayback.ts       # 60fps playback loop
 │   │   └── useScrubbing.ts      # Scrubber control
 │   ├── lib/
+│   │   ├── stores/              # State management (5-store architecture)
+│   │   │   ├── inputStore.ts        # User input from UI controls
+│   │   │   ├── commandStore.ts      # Commanded robot state
+│   │   │   ├── hardwareStore.ts     # Hardware feedback
+│   │   │   ├── timelineStore.ts     # Timeline & playback
+│   │   │   ├── robotConfigStore.ts  # Robot configuration
+│   │   │   └── index.ts             # Store re-exports
 │   │   ├── types.ts             # TypeScript interfaces
 │   │   ├── constants.ts         # Joint limits, DH params, config
-│   │   ├── store.ts             # Zustand state management
 │   │   ├── kinematics.ts        # FK/IK algorithms
 │   │   └── interpolation.ts     # Linear interpolation
 │   ├── page.tsx                 # Main application page

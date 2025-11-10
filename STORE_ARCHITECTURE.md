@@ -2,7 +2,7 @@
 
 ## Overview
 
-The frontend state is organized into 5 focused Zustand stores, each with a single responsibility:
+The frontend state is organized into **5 focused Zustand stores**, each with a single responsibility. This separation ensures clear data flow, better performance, and easier testing.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -38,38 +38,22 @@ LAYER 5: CONFIGURATION
 
 **Location:** `app/lib/stores/inputStore.ts`
 
-### State
+### Responsibilities
 
-```typescript
-{
-  // Joint mode: Direct joint values from sliders
-  inputJointAngles: { J1: 0, J2: 0, J3: 0, J4: 0, J5: 0, J6: 0 }
+- Stores direct user input from UI controls (before any processing)
+- Manages UI preferences (selected joint, step angle, visibility toggles)
+- In joint mode: stores raw joint angle values from sliders
+- In cartesian mode: stores cartesian values BEFORE IK solving
 
-  // Cartesian mode: Slider values BEFORE IK is solved
-  inputCartesianPose: { X: 0, Y: 0, Z: 300, RX: 0, RY: 0, RZ: 0 }
+### State Contents
 
-  // UI preferences
-  selectedJoint: null | 'J1' | 'J2' | ...
-  stepAngle: 1.0
-  showTargetRobot: true
-  showHardwareRobot: true
-}
-```
-
-### Usage
-
-```typescript
-import { useInputStore } from '@/app/lib/stores';
-
-// In JointSliders component
-const inputAngles = useInputStore(s => s.inputJointAngles);
-const setAngle = useInputStore(s => s.setInputJointAngle);
-
-setAngle('J1', 45.0); // User moved J1 slider to 45°
-```
+- **Input Joint Angles:** Raw joint values from sliders (J1-J6)
+- **Input Cartesian Pose:** Cartesian values before IK (X, Y, Z, RX, RY, RZ)
+- **UI Preferences:** Selected joint, step angle, robot visibility toggles
 
 ### Visual Representation
-- **Red/Green/Blue Gizmo** in 3D viewer shows `inputCartesianPose` (cartesian mode only)
+
+- **Red/Green/Blue RGB Gizmo** (cartesian mode only) shows the input cartesian pose
 
 ---
 
@@ -79,47 +63,27 @@ setAngle('J1', 45.0); // User moved J1 slider to 45°
 
 **Location:** `app/lib/stores/commandStore.ts`
 
-### State
+### Responsibilities
 
-```typescript
-{
-  // Joint angles we're commanding (from input or IK result)
-  commandedJointAngles: { J1: 0, J2: 0, ... }
+- Stores joint angles we're commanding (from direct input OR from IK solving)
+- Maintains the target robot's TCP pose (calculated via URDF forward kinematics)
+- Manages motion parameters (speed, acceleration)
+- Controls live control and teach modes
+- Tracks joint homing status
 
-  // Target robot TCP (calculated from URDF FK)
-  commandedTcpPose: { X: 200, Y: 0, Z: 300, ... } | null
+### State Contents
 
-  // URDF robot reference
-  targetRobotRef: URDFRobot | null
-
-  // Motion parameters
-  speed: 80  // 0-100%
-  accel: 60  // 0-100%
-
-  // Control modes (mutually exclusive)
-  liveControlEnabled: false   // Send commands on change
-  teachModeEnabled: false      // Copy from hardware
-
-  // Joint homing status
-  jointHomedStatus: { J1: false, J2: false, ... }
-}
-```
-
-### Usage
-
-```typescript
-import { useCommandStore } from '@/app/lib/stores';
-
-// Read commanded state
-const commanded = useCommandStore(s => s.commandedJointAngles);
-
-// After IK solve
-useCommandStore.getState().setCommandedJointAngles(ikResult.joints);
-```
+- **Commanded Joint Angles:** The joint angles we want the robot at (from input or IK)
+- **Commanded TCP Pose:** Calculated from URDF FK using commanded joint angles
+- **Target Robot Reference:** URDF model reference for visualization
+- **Motion Parameters:** Speed (0-100%), Acceleration (0-100%)
+- **Control Modes:** Live control enabled, teach mode enabled (mutually exclusive)
+- **Joint Homing Status:** Boolean per joint (J1-J6)
 
 ### Visual Representation
-- **Colored URDF Robot** in 3D viewer (target robot)
-- **Orange/Cyan/Magenta Gizmo** shows `commandedTcpPose`
+
+- **Colored URDF Robot** in 3D viewer (the "target" robot)
+- **Orange/Cyan/Magenta Gizmo** shows commanded TCP pose
 
 ---
 
@@ -129,45 +93,29 @@ useCommandStore.getState().setCommandedJointAngles(ikResult.joints);
 
 **Location:** `app/lib/stores/hardwareStore.ts`
 
-### State
+### Responsibilities
 
-```typescript
-{
-  // Real joint angles from encoders
-  hardwareJointAngles: { J1: 0, J2: 0, ... } | null
+- Stores real joint angles from hardware encoders (via WebSocket)
+- Maintains actual TCP pose from backend FK
+- Stores I/O status, gripper status, robot status
+- Manages connection status
+- Provides reference for ghost robot visualization
 
-  // Real TCP from backend FK
-  hardwareCartesianPose: { X: 200, Y: 0, Z: 300, ... } | null
+### State Contents
 
-  // Frontend-calculated TCP from URDF
-  hardwareTcpPose: { X: 200, Y: 0, Z: 300, ... } | null
-
-  // URDF robot reference for ghost
-  hardwareRobotRef: URDFRobot | null
-
-  // Hardware status
-  ioStatus: { ... } | null
-  gripperStatus: { ... } | null
-  robotStatus: { is_stopped, estop_active, ... } | null
-  connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'error'
-}
-```
-
-### Usage
-
-```typescript
-import { useHardwareStore } from '@/app/lib/stores';
-
-// WebSocketConnector updates this
-const setHardware = useHardwareStore(s => s.setHardwareJointAngles);
-socket.on('joints', (data) => {
-  setHardware({ J1: data[0], J2: data[1], ... });
-});
-```
+- **Hardware Joint Angles:** Real encoder values from physical robot
+- **Hardware Cartesian Pose:** TCP pose from backend FK calculation
+- **Hardware TCP Pose:** Frontend-calculated TCP from URDF (for visualization)
+- **Hardware Robot Reference:** URDF model reference for ghost visualization
+- **I/O Status:** Digital I/O state (inputs/outputs, e-stop)
+- **Gripper Status:** Gripper device ID, position, object detection
+- **Robot Status:** E-stop active, robot stopped, etc.
+- **Connection Status:** disconnected | connecting | connected | error
 
 ### Visual Representation
+
 - **Ghost URDF Robot** in 3D viewer (transparent, shows actual position)
-- **Yellow/Lime/Purple Gizmo** shows `hardwareTcpPose`
+- **Yellow/Lime/Purple Gizmo** shows hardware TCP pose
 
 ---
 
@@ -177,98 +125,94 @@ socket.on('joints', (data) => {
 
 **Location:** `app/lib/stores/timelineStore.ts`
 
-### State
+### Responsibilities
 
-```typescript
-{
-  timeline: {
-    name: 'Untitled'
-    mode: 'joint' | 'cartesian'
-    keyframes: [{ id, time, joint, value }, ...]
-    cartesianKeyframes: [{ id, time, axis, value }, ...]
-    duration: 10.0
-  }
+- Manages timeline metadata (name, duration, motion mode)
+- Stores keyframes for joint mode and cartesian mode
+- Controls playback state (playing, paused, current time)
+- Handles keyframe recording, editing, deletion
+- Manages preview vs execute playback modes
 
-  playbackState: {
-    isPlaying: false
-    currentTime: 0
-    startTime: null
-    loop: false
-    executeOnRobot: false  // Preview vs Execute mode
-  }
-}
-```
+### State Contents
 
-### Usage
+- **Timeline Metadata:** Name, mode (joint/cartesian), duration
+- **Joint Keyframes:** Array of {id, time, joint, value} for joint mode
+- **Cartesian Keyframes:** Array of {id, time, axis, value} for cartesian mode
+- **Playback State:** isPlaying, currentTime, startTime, loop, executeOnRobot
 
-```typescript
-import { useTimelineStore } from '@/app/lib/stores';
+### Modes
 
-// Add keyframe at current playhead time
-const recordKeyframes = useTimelineStore(s => s.recordKeyframes);
-const play = useTimelineStore(s => s.play);
-
-play(false); // Preview mode
-play(true);  // Execute mode (sends to robot)
-```
+- **Preview Mode:** Playback only updates visualization (no hardware commands)
+- **Execute Mode:** Playback sends motion commands to physical robot
 
 ---
 
 ## 5. useRobotConfigStore
 
-**Purpose:** Robot configuration settings
+**Purpose:** Robot configuration settings that rarely change
 
 **Location:** `app/lib/stores/robotConfigStore.ts`
 
-### State
+### Responsibilities
 
-```typescript
-{
-  // TCP offset from J6 flange (mm)
-  tcpOffset: { x: 47, y: 0, z: -62 }
+- Stores TCP (Tool Center Point) offset from J6 flange
+- Manages IK axis mask for selective axis solving
+- Provides configuration loaded from backend config.yaml
 
-  // IK axis mask
-  ikAxisMask: { X: true, Y: true, Z: true, RX: true, RY: true, RZ: true }
-}
-```
+### State Contents
 
-### Usage
-
-```typescript
-import { useRobotConfigStore } from '@/app/lib/stores';
-
-const tcpOffset = useRobotConfigStore(s => s.tcpOffset);
-const setOffset = useRobotConfigStore(s => s.setTcpOffset);
-
-setOffset('z', -65); // Adjust tool length
-```
+- **TCP Offset:** {x, y, z} offset in millimeters from J6 reference frame
+- **IK Axis Mask:** {X, Y, Z, RX, RY, RZ} boolean flags for IK solving
 
 ---
 
-## Data Flow Examples
+## Naming Conventions
+
+### Variable Prefixes
+
+Variables are prefixed to indicate which store they belong to:
+
+| Prefix | Store | Meaning | Example |
+|--------|-------|---------|---------|
+| `input*` | inputStore | Raw user input | `inputJointAngles`, `inputCartesianPose` |
+| `commanded*` | commandStore | Commanded state | `commandedJointAngles`, `commandedTcpPose` |
+| `hardware*` | hardwareStore | Hardware feedback | `hardwareJointAngles`, `hardwareCartesianPose` |
+| (no prefix) | timelineStore | Timeline data | `keyframes`, `playbackState` |
+| (no prefix) | robotConfigStore | Configuration | `tcpOffset`, `ikAxisMask` |
+
+### Store Usage Patterns
+
+- **Reading State:** Subscribe to specific slices for optimal performance
+- **Writing State:** Use store actions (setters) provided by each store
+- **Cross-Store Updates:** Components coordinate updates across stores when needed
+- **WebSocket Updates:** Only update hardwareStore (never directly modify hardware state from UI)
+
+---
+
+## Data Flow Diagrams
 
 ### Joint Mode Control Flow
 
 ```
 1. User moves J1 slider to 45°
    ↓
-2. useInputStore.setInputJointAngle('J1', 45)
+2. Update inputStore.inputJointAngles.J1 = 45
    ↓
-3. Component syncs: useCommandStore.setCommandedJointAngle('J1', 45)
+3. Component syncs to commandStore.commandedJointAngles.J1 = 45
    ↓
 4. Target Robot URDF updates (reads commandedJointAngles)
    ↓
-5. TargetTCPVisualizer calculates commandedTcpPose from URDF
+5. Forward kinematics calculates commandedTcpPose from URDF
    ↓
-6. If liveControlEnabled: API call sends commandedJointAngles to hardware
+6. If liveControlEnabled: API sends commandedJointAngles to hardware
    ↓
 7. WebSocket receives hardware feedback
    ↓
-8. useHardwareStore.setHardwareJointAngles(actual values)
+8. Update hardwareStore.hardwareJointAngles (actual values)
    ↓
 9. Ghost Robot URDF updates (reads hardwareJointAngles)
    ↓
-10. ActualTCPVisualizer calculates hardwareTcpPose from URDF
+10. Forward kinematics calculates hardwareTcpPose from ghost URDF
 ```
 
 ### Cartesian Mode Control Flow
@@ -276,15 +220,15 @@ setOffset('z', -65); // Adjust tool length
 ```
 1. User moves X slider to 250mm
    ↓
-2. useInputStore.setInputCartesianValue('X', 250)
+2. Update inputStore.inputCartesianPose.X = 250
    ↓
-3. Red gizmo shows inputCartesianPose
+3. Red RGB gizmo shows inputCartesianPose
    ↓
 4. User clicks "Solve IK" button
    ↓
 5. IK solver: inputCartesianPose → joint angles
    ↓
-6. useCommandStore.setCommandedJointAngles(ikResult.joints)
+6. Update commandStore.commandedJointAngles = IK result
    ↓
 7. (Continue as joint mode flow from step 4)
 ```
@@ -294,22 +238,48 @@ setOffset('z', -65); // Adjust tool length
 ```
 1. User clicks Play button
    ↓
-2. useTimelineStore.play(false) // Preview mode
+2. Call timelineStore.play(executeOnRobot: false) // Preview mode
    ↓
-3. usePlayback hook interpolates keyframes
+3. usePlayback hook runs 60fps interpolation loop
    ↓
-4. Updates useCommandStore.commandedJointAngles every frame
+4. Each frame: interpolate keyframes → joint angles
    ↓
-5. Target robot visual follows playback
+5. Update commandStore.commandedJointAngles with interpolated values
    ↓
-6. Orange gizmo shows commanded TCP during playback
+6. Target robot visual follows playback smoothly
+   ↓
+7. Orange gizmo shows commanded TCP during playback
+```
+
+### Execute Playback Flow
+
+```
+1. User clicks "Execute" button (send icon)
+   ↓
+2. Pre-playback positioning: move robot to t=0 keyframe
+   ↓
+3. Poll hardwareStore.hardwareJointAngles until arrival
+   ↓
+4. Call timelineStore.play(executeOnRobot: true) // Execute mode
+   ↓
+5. usePlayback hook interpolates AND sends move commands
+   ↓
+6. On keyframe crossing: API sends move command with duration
+   ↓
+7. Hardware executes smooth motion between keyframes
+   ↓
+8. WebSocket streams hardwareJointAngles back to frontend
+   ↓
+9. Ghost robot follows actual hardware position
 ```
 
 ---
 
-## Migration from Old Store
+## Migration Guide
 
 ### Variable Name Mapping
+
+Reference for migrating from old monolithic store to new 5-store architecture:
 
 | Old Name (useTimelineStore) | New Store | New Name |
 |----------------------------|-----------|----------|
@@ -324,48 +294,97 @@ setOffset('z', -65); // Adjust tool length
 | `targetFollowsActual` | useCommandStore | `teachModeEnabled` |
 | `targetRobotRef` | useCommandStore | `targetRobotRef` |
 | `actualRobotRef` | useHardwareStore | `hardwareRobotRef` |
+| `tcpOffset` | useRobotConfigStore | `tcpOffset` |
+| `ikAxisMask` | useRobotConfigStore | `ikAxisMask` |
 
----
-
-## Component Migration Checklist
+### Component Migration Checklist
 
 When migrating a component:
 
 - [ ] Import new stores from `@/app/lib/stores`
-- [ ] Update variable names to new convention
-- [ ] Use appropriate store for each piece of state
-- [ ] Test that component still works
-- [ ] Check for console errors
-- [ ] Verify 3D visualization updates correctly
+- [ ] Update variable names to new naming convention
+- [ ] Use appropriate store for each piece of state:
+  - User input → inputStore
+  - Commands to robot → commandStore
+  - Hardware feedback → hardwareStore
+  - Timeline data → timelineStore
+  - Configuration → robotConfigStore
+- [ ] In joint mode: update BOTH inputStore and commandStore simultaneously
+- [ ] In cartesian mode: update inputStore first, commandStore after IK
+- [ ] Test that component still works correctly
+- [ ] Verify 3D visualization updates as expected
+- [ ] Check browser console for errors
 
 ---
 
-## Benefits of New Architecture
+## Benefits of 5-Store Architecture
 
-### 1. **Clear Intent**
-```typescript
-// OLD (confusing)
-const current = useTimelineStore(s => s.currentJointAngles);  // Target or actual?
+### 1. Clear Intent and Readability
 
-// NEW (clear)
-const commanded = useCommandStore(s => s.commandedJointAngles);  // What we command
-const hardware = useHardwareStore(s => s.hardwareJointAngles);   // What is real
+The old monolithic store had ambiguous variable names like `currentJointAngles` - did this mean what the user typed, what we commanded, or what the robot is actually at?
+
+The new architecture makes intent crystal clear through naming:
+- `inputJointAngles` - what user typed
+- `commandedJointAngles` - what we're telling robot to do
+- `hardwareJointAngles` - what robot is actually at
+
+### 2. Better Performance
+
+**Granular Subscriptions:** Components only re-render when their specific slice changes
+- Input changes don't trigger hardware feedback subscribers
+- Timeline changes don't affect robot control subscribers
+- Hardware updates don't trigger timeline re-renders
+
+**Reduced Re-Renders:** Each store is focused, so fewer components subscribe to each store
+
+### 3. Easier Testing and Debugging
+
+**Independent Mocking:** Test timeline logic without robot hardware, test robot control without timeline
+**Clear Data Flow:** Easier to trace bugs through the 5-layer architecture
+**Isolated State:** Each domain (input, command, hardware, timeline, config) is independent
+
+### 4. Scalability and Maintainability
+
+**Easy to Extend:** Add new robot features to commandStore without touching input/hardware
+**Easy to Add Sensors:** Add new hardware sensors to hardwareStore without touching commands
+**Timeline Stays Focused:** Keyframe editing logic is isolated from robot control
+
+### 5. No Circular Dependencies
+
+The old store had dynamic imports inside Zustand actions, creating circular dependency risks. The new architecture eliminates this by having components orchestrate cross-store updates.
+
+---
+
+## Architecture Principles
+
+### Principle 1: Single Responsibility
+
+Each store has ONE job:
+- inputStore: Track what user types
+- commandStore: Track what we command
+- hardwareStore: Track hardware reality
+- timelineStore: Manage keyframes
+- robotConfigStore: Store settings
+
+### Principle 2: Unidirectional Data Flow
+
+```
+User Input → Input Store → Command Store → API → Hardware
+                                              ↓
+                                     Hardware Store (via WebSocket)
 ```
 
-### 2. **Better Performance**
-- Input changes don't trigger hardware feedback re-renders
-- Timeline changes don't affect robot state subscribers
-- More granular subscriptions = fewer re-renders
+### Principle 3: Components Coordinate, Stores Don't
 
-### 3. **Easier Testing**
-- Mock individual stores independently
-- Test timeline logic without robot hardware
-- Test robot control without timeline
+Stores never directly update other stores. Components read from one store and write to another, making the data flow explicit and traceable.
 
-### 4. **Scalability**
-- Easy to add new robot features to commandStore
-- Easy to add new hardware sensors to hardwareStore
-- Timeline remains focused on keyframe editing
+### Principle 4: WebSocket as Single Source of Truth for Hardware
+
+Only WebSocket updates hardwareStore. UI never directly modifies hardware state.
+
+### Principle 5: Timeline Drives Commanded State During Playback
+
+During playback, the usePlayback hook interpolates keyframes and updates commandedJointAngles. This drives the visual and optionally sends commands to hardware.
 
 ---
 
@@ -373,30 +392,57 @@ const hardware = useHardwareStore(s => s.hardwareJointAngles);   // What is real
 
 **Q: Why separate input and commanded stores?**
 
-A: In joint mode, they're usually the same. But in cartesian mode, `inputCartesianPose` is what the user typed (before IK), while `commandedJointAngles` is the result of IK solving. Separating them makes the data flow crystal clear.
+A: In joint mode, they're usually synchronized. But in cartesian mode, `inputCartesianPose` is what the user typed (before IK), while `commandedJointAngles` is the result after IK solving. Separating them makes the data flow explicit and prevents confusion.
 
-**Q: When should I use `commanded` vs `hardware`?**
+**Q: When should I use commanded vs hardware?**
 
 A: Use `commanded` for the target robot visual and what you're sending to hardware. Use `hardware` for actual robot feedback from encoders/sensors. The ghost robot shows `hardware`, the colored robot shows `commanded`.
 
-**Q: Can I still access the old store during migration?**
-
-A: Yes! The old `app/lib/store.ts` still exists for backward compatibility. Migrate components one at a time. Once all components are migrated, we'll remove the old store.
-
 **Q: How do I sync input → commanded?**
 
-A: In joint mode, components should set both simultaneously. In cartesian mode, only set `commanded` after IK solving succeeds. See data flow examples above.
+A: In joint mode, components should update both stores simultaneously (input for UI state, commanded for robot state). In cartesian mode, only update `commanded` after IK solving succeeds.
+
+**Q: What happens during playback?**
+
+A: The usePlayback hook runs at 60fps, interpolating keyframes and updating `commandedJointAngles` each frame. The target robot visual follows playback. In execute mode, it also sends move commands to hardware.
+
+**Q: Why do we need both hardwareCartesianPose and hardwareTcpPose?**
+
+A: `hardwareCartesianPose` comes from backend FK (calculated on server). `hardwareTcpPose` is calculated in frontend from URDF for visualization consistency. We keep both for validation and debugging.
+
+**Q: Can stores talk to each other?**
+
+A: No. Stores are independent. Components read from one store and write to another, making data flow explicit.
 
 ---
 
-## Next Steps
+## Implementation Status
 
-1. ✅ Create new stores (DONE)
-2. ⏳ Migrate visualization components (TargetTCPVisualizer, ActualTCPVisualizer)
-3. ⏳ Migrate WebSocket connector
-4. ⏳ Migrate input components (sliders, keyboard controls)
-5. ⏳ Migrate RobotViewer
-6. ⏳ Test all core features
-7. ⏳ Remove old store
+✅ **Migration Complete** (as of 2025-11-10)
 
-See implementation plan in git commit messages for detailed migration strategy.
+All components, hooks, and pages have been migrated to the new 5-store architecture:
+
+- **Phase 1:** Fixed dynamic import anti-pattern in timelineStore
+- **Phase 2:** Migrated 7 simple components
+- **Phase 3:** Migrated 2 page components (app/page.tsx, app/control/page.tsx)
+- **Phase 4:** Migrated 2 Timeline UI components
+- **Phase 5:** Migrated 3 playback hooks (60fps loop - HIGH RISK)
+- **Phase 6:** Deprecated old monolithic store
+
+**Old Store Location:** `app/lib/deprecated/store.ts` (for reference only)
+
+**New Stores Location:** `app/lib/stores/`
+- `inputStore.ts`
+- `commandStore.ts`
+- `hardwareStore.ts`
+- `timelineStore.ts`
+- `robotConfigStore.ts`
+- `index.ts` (re-exports all stores)
+
+---
+
+## Related Documentation
+
+- **MIGRATION_STATUS.md** - Detailed migration tracking and phase breakdown
+- **README.md** - Project overview and setup instructions
+- **CLAUDE.md** - Project context for AI assistants

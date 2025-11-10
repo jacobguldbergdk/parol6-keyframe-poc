@@ -11,6 +11,7 @@ import ActualTCPVisualizer from './ActualTCPVisualizer';
 import JointLabels from './JointLabels';
 import InteractiveRobotMeshes from './InteractiveRobotMeshes';
 import { JointContextMenu } from './JointContextMenu';
+import { TCPPoseDisplay, TCPPoseHeader } from './TCPPoseDisplay';
 import { JOINT_LIMITS, JOINT_ANGLE_OFFSETS, CARTESIAN_LIMITS } from '../lib/constants';
 import type { JointName, CartesianAxis } from '../lib/types';
 import { inverseKinematicsDetailed } from '../lib/kinematics';
@@ -614,43 +615,33 @@ export default function RobotViewer() {
 
       {/* Coordinate Overlay */}
       <div className="absolute top-4 left-4 bg-black/70 text-white p-3 rounded-lg text-xs font-mono z-10 backdrop-blur-sm">
-        {/* TCP Pose Section */}
+        {/* TCP Pose Section - Robot Coordinates (Z-up) */}
         <div className="mb-3">
-          <div className="font-semibold mb-2 text-sm">TCP Pose</div>
+          <div className="font-semibold mb-2 text-sm">TCP Pose (Robot Coords)</div>
           {commandedTcpPose || hardwareTcpPose ? (
             <div>
-              {/* Column Headers */}
-              <div className="grid grid-cols-7 gap-2 mb-1 text-[10px] text-gray-400 text-center">
-                <div></div>
-                <div>X</div>
-                <div>Y</div>
-                <div>Z</div>
-                <div>RX</div>
-                <div>RY</div>
-                <div>RZ</div>
-              </div>
-              {/* Commanded Row (orange/cyan/magenta - commanded robot) */}
+              <TCPPoseHeader className="text-[10px] text-gray-400" />
               {commandedTcpPose && (
-                <div className="grid grid-cols-7 gap-2 mb-0.5">
-                  <div className="text-gray-400">Commanded:</div>
-                  <div className="text-center text-orange-400">{commandedTcpPose.X.toFixed(1)}</div>
-                  <div className="text-center text-cyan-400">{commandedTcpPose.Y.toFixed(1)}</div>
-                  <div className="text-center text-fuchsia-400">{commandedTcpPose.Z.toFixed(1)}</div>
-                  <div className="text-center text-orange-400">{commandedTcpPose.RX.toFixed(1)}</div>
-                  <div className="text-center text-cyan-400">{commandedTcpPose.RY.toFixed(1)}</div>
-                  <div className="text-center text-fuchsia-400">{commandedTcpPose.RZ.toFixed(1)}</div>
-                </div>
+                <TCPPoseDisplay
+                  pose={commandedTcpPose}
+                  label="Commanded"
+                  colors={{
+                    x: '#ff8800',  // Orange
+                    y: '#00dddd',  // Cyan
+                    z: '#dd00dd'   // Magenta/Fuchsia
+                  }}
+                  className="mb-0.5"
+                />
               )}
-              {/* Hardware Row (yellow/lime/purple - hardware robot) */}
-              <div className="grid grid-cols-7 gap-2">
-                <div className="text-gray-400">Hardware:</div>
-                <div className="text-center text-yellow-400">{hardwareTcpPose?.X.toFixed(1) ?? 'N/A'}</div>
-                <div className="text-center text-lime-400">{hardwareTcpPose?.Y.toFixed(1) ?? 'N/A'}</div>
-                <div className="text-center text-purple-400">{hardwareTcpPose?.Z.toFixed(1) ?? 'N/A'}</div>
-                <div className="text-center text-yellow-400">{hardwareTcpPose?.RX.toFixed(1) ?? 'N/A'}</div>
-                <div className="text-center text-lime-400">{hardwareTcpPose?.RY.toFixed(1) ?? 'N/A'}</div>
-                <div className="text-center text-purple-400">{hardwareTcpPose?.RZ.toFixed(1) ?? 'N/A'}</div>
-              </div>
+              <TCPPoseDisplay
+                pose={hardwareTcpPose}
+                label="Hardware"
+                colors={{
+                  x: '#ffff00',  // Yellow
+                  y: '#88ff00',  // Lime
+                  z: '#aa00ff'   // Purple
+                }}
+              />
             </div>
           ) : (
             <div className="text-gray-500 italic">Loading robot model...</div>

@@ -1,6 +1,10 @@
 /**
  * TCP (Tool Center Point) calculation utilities
  * Extracted to eliminate code duplication across TargetTCPVisualizer, ActualTCPVisualizer, and kinematics
+ *
+ * IMPORTANT: This file returns poses in THREE.JS COORDINATES (Y-up), NOT robot coordinates (Z-up).
+ * The URDF robots are rendered with a -90° X rotation in RobotViewer, which converts Z-up to Y-up.
+ * Callers must use coordinateTransform.ts to convert to robot coordinates for data layer.
  */
 
 import * as THREE from 'three';
@@ -15,15 +19,18 @@ export interface TCPOffset {
 }
 
 /**
- * Calculate TCP pose from URDF robot model
+ * Calculate TCP pose from URDF robot model in Three.js coordinate space
  *
- * This function extracts the world position and orientation of the L6 link,
- * applies the TCP offset, and transforms the coordinates to match the robot's
- * coordinate system conventions.
+ * This function extracts the world position and orientation of the L6 link
+ * and applies the TCP offset. Returns coordinates in THREE.JS space (Y-up).
+ *
+ * NOTE: The URDF is rendered with rotation={[-Math.PI/2, 0, 0]} wrapper,
+ * so these coordinates are in the rotated Three.js Y-up space, not robot Z-up space.
+ * Use coordinateTransform.threeJsToRobot() to convert to robot coordinates.
  *
  * @param urdfRobot - The URDF robot instance
  * @param tcpOffset - TCP offset in mm (relative to L6 flange)
- * @returns CartesianPose with X,Y,Z in mm and RX,RY,RZ in degrees, or null if calculation fails
+ * @returns CartesianPose in Three.js coordinates (Y-up) with X,Y,Z in mm and RX,RY,RZ in degrees, or null if calculation fails
  */
 export function calculateTcpPoseFromUrdf(
   urdfRobot: URDFRobot,
@@ -83,16 +90,18 @@ export function calculateTcpPoseFromUrdf(
     const ry_raw = (euler.y * 180) / Math.PI;
     const rz_raw = (euler.z * 180) / Math.PI;
 
-    // Apply offset, then apply negation
+    // Apply orientation offset and negation
     const rx_final = (ORIENTATION_CONFIG.negateRX ? -1 : 1) * (rx_raw - ORIENTATION_CONFIG.offset.RX);
     const ry_final = (ORIENTATION_CONFIG.negateRY ? -1 : 1) * (ry_raw - ORIENTATION_CONFIG.offset.RY);
     const rz_final = (ORIENTATION_CONFIG.negateRZ ? -1 : 1) * (rz_raw - ORIENTATION_CONFIG.offset.RZ);
 
-    // Build final pose with coordinate transformations
+    // Return raw Three.js coordinates (Y-up) - NO transformation to robot coordinates
+    // The URDF is already rendered with rotation wrapper, so these are in rotated space
+    // Callers must use coordinateTransform.threeJsToRobot() to get robot coordinates
     return {
-      X: tcpWorldPosition.x * 1000,      // X stays the same
-      Y: -tcpWorldPosition.z * 1000,     // Y = -Z (swap and negate)
-      Z: tcpWorldPosition.y * 1000,      // Z = Y (swap)
+      X: tcpWorldPosition.x * 1000,      // X in Three.js space (same as robot X)
+      Y: tcpWorldPosition.y * 1000,      // Y in Three.js space (up direction, was robot Z)
+      Z: tcpWorldPosition.z * 1000,      // Z in Three.js space (backward, was robot -Y)
       RX: rx_final,
       RY: ry_final,
       RZ: rz_final

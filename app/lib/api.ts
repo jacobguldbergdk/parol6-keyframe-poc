@@ -16,40 +16,6 @@ export interface IKResult {
 }
 
 /**
- * Convert frontend UI coordinates to backend coordinate system
- *
- * Frontend applies transformations when extracting from URDF:
- * - X = URDF.x * 1000
- * - Y = -URDF.z * 1000
- * - Z = URDF.y * 1000
- * - RX = -raw_rx
- * - RY = -raw_ry + 90
- * - RZ = raw_rz + 180
- *
- * This function reverses those transformations for backend commands
- */
-function frontendToBackendCoordinates(frontendPose: CartesianPose): number[] {
-  // Reverse position transformations
-  const backendX = frontendPose.X / 1000;
-  const backendY = frontendPose.Z / 1000;
-  const backendZ = -frontendPose.Y / 1000;
-
-  // Reverse orientation transformations
-  const backendRX = -frontendPose.RX;
-  const backendRY = ORIENTATION_CONFIG.offset.RY - frontendPose.RY;  // 90 - RY
-  const backendRZ = frontendPose.RZ - ORIENTATION_CONFIG.offset.RZ;  // RZ - (-180) = RZ + 180
-
-  return [
-    backendX * 1000,  // Convert back to mm for backend
-    backendY * 1000,
-    backendZ * 1000,
-    backendRX,
-    backendRY,
-    backendRZ
-  ];
-}
-
-/**
  * Call backend IK solver
  *
  * Uses the same IK implementation as the actual robot controller,
@@ -252,14 +218,17 @@ export async function moveJoints(
 
 /**
  * Move robot to pose (joint-interpolated motion, curved path)
+ *
+ * @param pose - Target pose in robot coordinates (Z-up)
+ * @param speedPercentage - Speed as percentage (1-100)
  */
 export async function movePose(
   pose: CartesianPose,
   speedPercentage: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Convert frontend UI coordinates to backend coordinate system
-    const poseArray = frontendToBackendCoordinates(pose);
+    // Pose is already in robot coordinates (Z-up) - send directly to backend
+    const poseArray = [pose.X, pose.Y, pose.Z, pose.RX, pose.RY, pose.RZ];
 
     const response = await fetch(`${getApiBaseUrl()}/api/robot/move/pose`, {
       method: 'POST',
@@ -287,14 +256,17 @@ export async function movePose(
 
 /**
  * Move robot to pose (cartesian straight-line motion)
+ *
+ * @param pose - Target pose in robot coordinates (Z-up)
+ * @param speedPercentage - Speed as percentage (1-100)
  */
 export async function moveCartesian(
   pose: CartesianPose,
   speedPercentage: number
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Convert frontend UI coordinates to backend coordinate system
-    const poseArray = frontendToBackendCoordinates(pose);
+    // Pose is already in robot coordinates (Z-up) - send directly to backend
+    const poseArray = [pose.X, pose.Y, pose.Z, pose.RX, pose.RY, pose.RZ];
 
     const response = await fetch(`${getApiBaseUrl()}/api/robot/move/cartesian`, {
       method: 'POST',

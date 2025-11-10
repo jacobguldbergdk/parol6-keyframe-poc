@@ -12,6 +12,7 @@ import { JointAngles, CartesianPose, IkAxisMask } from './types';
 import { STANDBY_POSITION, ORIENTATION_CONFIG, JOINT_ANGLE_OFFSETS } from './constants';
 import { useTimelineStore } from './store';
 import { calculateTcpPoseFromUrdf } from './tcpCalculations';
+import { threeJsToRobot } from './coordinateTransform';
 
 // DH Parameters from PAROL6_ROBOT.py (converted to mm)
 const DH_PARAMS = {
@@ -433,9 +434,12 @@ class Matrix {
 }
 
 /**
- * Get TCP pose (position + orientation) from URDF model
+ * Get TCP pose (position + orientation) from URDF model in ROBOT COORDINATES
  * This is our ACCURATE FK that includes all 6 joints and TCP offset
- * Returns full 6-DOF pose: position (X, Y, Z in mm) and orientation (RX, RY, RZ in degrees)
+ * Returns full 6-DOF pose in robot coordinates (Z-up): position (X, Y, Z in mm) and orientation (RX, RY, RZ in degrees)
+ *
+ * IMPORTANT: Converts from Three.js coordinates (Y-up) to robot coordinates (Z-up)
+ * so the IK solver works entirely in robot coordinate space.
  */
 function getURDFTcpPose(
   urdfRobot: any,
@@ -459,8 +463,13 @@ function getURDFTcpPose(
       urdfRobot.setJointValue(linkName, angleRad);
     });
 
-    // Calculate TCP pose using shared utility
-    return calculateTcpPoseFromUrdf(urdfRobot, tcpOffset);
+    // Calculate TCP pose from URDF (returns Three.js coordinates)
+    const threeJsPose = calculateTcpPoseFromUrdf(urdfRobot, tcpOffset);
+    if (!threeJsPose) return null;
+
+    // Convert Three.js coordinates (Y-up) to robot coordinates (Z-up)
+    // This ensures IK solver works entirely in robot coordinate space
+    return threeJsToRobot(threeJsPose);
   } catch (e) {
     return null;
   }

@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useHardwareStore, useRobotConfigStore } from '@/app/lib/stores';
 import { calculateTcpPoseFromUrdf, tcpPosesAreDifferent } from '@/app/lib/tcpCalculations';
+import { threeJsToRobot } from '@/app/lib/coordinateTransform';
 import type { CartesianPose } from '@/app/lib/types';
 
 /**
@@ -11,8 +12,7 @@ import type { CartesianPose } from '@/app/lib/types';
  * Uses yellow/lime/purple color scheme
  *
  * Reads from actual robot hardware feedback via WebSocket
- *
- * IMPORTANT: Gets TCP position from ghost URDF L6 link's world transform
+ * Converts from Three.js coordinates (Y-up) to robot coordinates (Z-up) before storing
  */
 export default function ActualTCPVisualizer() {
   const groupRef = useRef<THREE.Group>(null);
@@ -91,11 +91,14 @@ export default function ActualTCPVisualizer() {
       return;
     }
 
-    // Calculate TCP pose using shared utility
-    const newPosition = calculateTcpPoseFromUrdf(hardwareRobotRef, tcpOffset);
-    if (!newPosition) return;
+    // Calculate TCP pose from URDF (returns Three.js coordinates)
+    const threeJsPose = calculateTcpPoseFromUrdf(hardwareRobotRef, tcpOffset);
+    if (!threeJsPose) return;
 
-    // Update visual arrow group position (for rendering)
+    // Convert Three.js coordinates (Y-up) to robot coordinates (Z-up) for store
+    const robotPose = threeJsToRobot(threeJsPose);
+
+    // Update visual arrow group position (for rendering in Three.js space)
     const l6Link = hardwareRobotRef.links['L6'];
     if (l6Link) {
       l6Link.updateMatrixWorld(true);
@@ -116,10 +119,10 @@ export default function ActualTCPVisualizer() {
       groupRef.current.quaternion.copy(l6WorldQuaternion);
     }
 
-    // Only update store if position changed significantly
-    if (tcpPosesAreDifferent(newPosition, lastPositionRef.current)) {
-      lastPositionRef.current = newPosition;
-      useHardwareStore.setState({ hardwareTcpPose: newPosition });
+    // Store robot coordinates (Z-up) in store - only update if position changed
+    if (tcpPosesAreDifferent(robotPose, lastPositionRef.current)) {
+      lastPositionRef.current = robotPose;
+      useHardwareStore.setState({ hardwareTcpPose: robotPose });
     }
   });
 

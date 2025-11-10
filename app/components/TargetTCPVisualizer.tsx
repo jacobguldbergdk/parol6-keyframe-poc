@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useCommandStore, useRobotConfigStore } from '@/app/lib/stores';
 import { calculateTcpPoseFromUrdf, tcpPosesAreDifferent } from '@/app/lib/tcpCalculations';
+import { threeJsToRobot } from '@/app/lib/coordinateTransform';
 import type { CartesianPose } from '@/app/lib/types';
 
 /**
@@ -11,7 +12,7 @@ import type { CartesianPose } from '@/app/lib/types';
  * Uses orange/cyan/magenta color scheme
  *
  * IMPORTANT: Gets TCP position from URDF L6 link's world transform (accurate through all 6 joints)
- * NOT from simplified FK calculation (which was inaccurate)
+ * Converts from Three.js coordinates (Y-up) to robot coordinates (Z-up) before storing
  */
 export default function TargetTCPVisualizer() {
   const groupRef = useRef<THREE.Group>(null);
@@ -82,11 +83,14 @@ export default function TargetTCPVisualizer() {
   useFrame(() => {
     if (!groupRef.current || !targetRobotRef) return;
 
-    // Calculate TCP pose using shared utility
-    const newPosition = calculateTcpPoseFromUrdf(targetRobotRef, tcpOffset);
-    if (!newPosition) return;
+    // Calculate TCP pose from URDF (returns Three.js coordinates)
+    const threeJsPose = calculateTcpPoseFromUrdf(targetRobotRef, tcpOffset);
+    if (!threeJsPose) return;
 
-    // Update visual arrow group position (for rendering)
+    // Convert Three.js coordinates (Y-up) to robot coordinates (Z-up) for store
+    const robotPose = threeJsToRobot(threeJsPose);
+
+    // Update visual arrow group position (for rendering in Three.js space)
     const l6Link = targetRobotRef.links['L6'];
     if (l6Link) {
       l6Link.updateMatrixWorld(true);
@@ -107,10 +111,10 @@ export default function TargetTCPVisualizer() {
       groupRef.current.quaternion.copy(l6WorldQuaternion);
     }
 
-    // Only update store if position changed significantly
-    if (tcpPosesAreDifferent(newPosition, lastPositionRef.current)) {
-      lastPositionRef.current = newPosition;
-      useCommandStore.setState({ commandedTcpPose: newPosition });
+    // Store robot coordinates (Z-up) in store - only update if position changed
+    if (tcpPosesAreDifferent(robotPose, lastPositionRef.current)) {
+      lastPositionRef.current = robotPose;
+      useCommandStore.setState({ commandedTcpPose: robotPose });
     }
   });
 

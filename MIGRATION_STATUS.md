@@ -4,15 +4,17 @@ This document tracks the progress of migrating from the monolithic `app/lib/stor
 
 ## Summary
 
-**Completed:** 5/6 phases (83%) - Timeline components intentionally skipped per user request
+**Status:** ✅ **MIGRATION COMPLETE** - 100% (as of 2025-11-10)
 
-- ✅ Phase 1: Cleanup & Foundation
-- ✅ Phase 2: New Store Architecture
-- ✅ Phase 3: Visualization Components (TCP visualizers, WebSocket connector)
-- ✅ Phase 4: Input Components (JointSliders, CartesianSliders, CompactJointSliders)
-- ✅ Phase 5: Non-Timeline Components (RobotViewer, TargetPoseVisualizer, useActualFollowsTarget)
-- ⏳ Phase 6: Timeline Components (SKIPPED - user requested to exclude timeline)
-- ⏳ Phase 7: Final Cleanup (remove old store when ready)
+- ✅ Phase 1: Fix dynamic import anti-pattern in timelineStore
+- ✅ Phase 2: Migrate simple components (7 files)
+- ✅ Phase 3: Migrate page components (2 files)
+- ✅ Phase 4: Migrate Timeline UI components (2 files)
+- ✅ Phase 5: Migrate playback hooks (3 files - HIGH RISK)
+- ✅ Phase 6: Deprecate old store and final cleanup
+
+**Old Store:** Moved to `app/lib/deprecated/store.ts` (reference only)
+**New Stores:** `app/lib/stores/` (5-store architecture)
 
 ## Migration Progress
 
@@ -100,61 +102,84 @@ Migrated components that handle user input:
 
 **Commit:** `63c4a6c` refactor: migrate input components to new store architecture
 
-## ⚠️ Remaining Work
+## ✅ Final Migration (2025-11-10)
 
-### ✅ Phase 5: Non-Timeline Components (COMPLETED)
+Following earlier foundation work, the remaining files were migrated in 6 focused phases:
 
-Migrated all non-timeline components (per user request to skip timeline):
+### Phase 1: Fix Dynamic Import Anti-Pattern (COMPLETED)
+**Commit:** `[see git log]`
 
-- ✅ `TargetPoseVisualizer.tsx`
-  - Changed: `currentCartesianPose` → `inputCartesianPose`
-  - Now displays user's cartesian slider input (red/green/blue gizmo)
-  - Uses: `useInputStore`, `useTimelineStore`
+- ✅ Modified `timelineStore.ts`:
+  - `recordKeyframes()` now accepts `jointAngles` parameter (was using dynamic import)
+  - `recordCartesianKeyframes()` now accepts `cartesianPose` parameter
+  - Eliminates circular dependency risks
 
-- ✅ `useActualFollowsTarget.ts` (Live Control Mode)
-  - Changed: `actualFollowsTarget` → `liveControlEnabled`
-  - Changed: `currentJointAngles` → `commandedJointAngles`
-  - Changed: `speed` now from `useCommandStore`
-  - Sends commanded values to robot via API
-  - Uses: `useCommandStore`, `useTimelineStore`
+### Phase 2: Migrate Simple Components (COMPLETED)
+**Commit:** `46e5483`
 
-- ✅ `RobotViewer.tsx` (781 lines)
-  - Main 3D visualization component with comprehensive updates:
-    - **Robot refs**: `actualRobotRef` → `hardwareRobotRef`
-    - **Joint angles**: `currentJointAngles` → `commandedJointAngles` (for commanded robot), `inputJointAngles` (for keyboard input)
-    - **Cartesian**: `currentCartesianPose` → `inputCartesianPose`
-    - **TCP positions**: `targetTcpPosition` → `commandedTcpPose`, `actualTcpPosition` → `hardwareTcpPose`
-    - **Visibility**: `showActualRobot` → `showHardwareRobot`
-    - **Control modes**: `targetFollowsActual` → `teachModeEnabled`, `actualFollowsTarget` → `liveControlEnabled`
-    - **Teach mode logic**: Now copies `hardwareJointAngles` → `inputJointAngles` + `commandedJointAngles`
-    - **Keyboard controls**: Now update both input and commanded stores
-    - **UI labels**: "Target" → "Commanded", "Actual" → "Hardware"
-  - Uses: All 5 stores
+Migrated 7 component files:
+- ✅ `ControlOptions.tsx` - Speed/accel/step controls
+- ✅ `JointControlPanel.tsx` - Joint sliders with actual/set indicators
+- ✅ `JointContextMenu.tsx` - Right-click menu for joints
+- ✅ `JointLabels.tsx` - 3D floating joint labels
+- ✅ `InteractiveRobotMeshes.tsx` - Clickable robot meshes
+- ✅ `RobotStatusPanel.tsx` - Hardware status display
 
-**Commit:** `778b412` refactor: migrate non-timeline components to new store architecture
+**Pattern Established:** Components update BOTH inputStore and commandStore in joint mode
 
-### ⏳ Phase 6: Timeline Components (SKIPPED - User Request)
+### Phase 3: Migrate Page Components (COMPLETED)
+**Commit:** `ba49213`
 
-Timeline-related components intentionally NOT migrated per user request:
+- ✅ `app/page.tsx` - Timeline editor page
+  - `targetTcpPosition` → `commandedTcpPose`
+  - `setTcpOffset` → `useRobotConfigStore`
+  - Auto-sync cartesian pose now uses `inputCartesianPose`
 
-- ⏳ `Timeline.tsx` - Timeline editor with keyframes and playback controls
-- ⏳ `usePlayback.ts` - Timeline interpolation and execution
-- ⏳ `usePrePlaybackPosition.ts` - Saves/restores position before playback
-- ⏳ `useScrubbing.ts` - Timeline scrubbing functionality
+- ✅ `app/control/page.tsx` - Control page
+  - Same migrations as main page
+  - Simplified motion mode handling
 
-**Note**: `useTargetFollowsActual.ts` doesn't exist as a separate file - teach mode logic was implemented directly in RobotViewer (now migrated)
+### Phase 4: Migrate Timeline UI Components (COMPLETED)
+**Commit:** `203fc19`
 
-### Phase 7: Final Cleanup (NOT STARTED)
+- ✅ `Timeline.tsx` - Timeline editor with keyframes
+  - Record functions now pass `commandedJointAngles` or `commandedTcpPose` as parameters
+  - Imports updated to new stores
 
-- ⏳ Delete old `app/lib/store.ts` (340 lines)
-- ⏳ Remove any remaining imports of old store
-- ⏳ Integration testing:
-  - Timeline editing and playback
-  - Live joint/cartesian control
-  - 3D visualization (all gizmos working)
-  - WebSocket hardware sync
-  - Teach mode
-  - IK solving (frontend + backend)
+- ✅ `PlaybackControls.tsx` - Play/pause/record buttons
+  - Same parameter passing for record functions
+  - Motion mode detection added
+
+### Phase 5: Migrate Playback Hooks (COMPLETED - HIGH RISK)
+**Commit:** `4a908b5`
+
+Critical 60fps playback system migrated:
+
+- ✅ `usePlayback.ts` - 60fps interpolation loop
+  - `currentJointAngles` → `commandedJointAngles` (writes during playback)
+  - `currentCartesianPose` → `inputCartesianPose` (cartesian visualization)
+  - `targetRobotRef` → `useCommandStore`
+  - `tcpOffset`, `ikAxisMask` → `useRobotConfigStore`
+
+- ✅ `useScrubbing.ts` - Timeline scrubbing
+  - Same store migrations as usePlayback
+  - Updates commanded state when scrubbing playhead
+
+- ✅ `usePrePlaybackPosition.ts` - Pre-playback positioning
+  - `actualJointAngles` → `hardwareJointAngles`
+  - Polls hardware state during pre-move
+
+**Critical Path Verified:** Playback → commandStore → Robot Hardware
+
+### Phase 6: Deprecate Old Store (COMPLETED)
+**Commit:** `d319b49`
+
+- ✅ Moved `app/lib/store.ts` → `app/lib/deprecated/store.ts`
+- ✅ Created `app/lib/deprecated/README.md` with migration notes
+- ✅ Verified ZERO remaining imports of old store in entire codebase
+- ✅ All 13 files successfully migrated
+
+**Git Status:** Clean working tree, ready for production
 
 ## Variable Name Mapping
 

@@ -2,12 +2,15 @@ import { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useInputStore, useTimelineStore } from '@/app/lib/stores';
+import { robotToThreeJs } from '@/app/lib/coordinateTransform';
 
 /**
  * Visualizes the INPUT cartesian pose that the user is controlling via sliders
  * This shows where the user wants the TCP to go (red/green/blue gizmo)
  * (IK will be computed later during playback to make the robot follow this target)
  * Only shown in cartesian mode - hidden in joint mode
+ *
+ * NOTE: Input pose is in robot coordinates (Z-up), converted to Three.js (Y-up) for rendering
  */
 export default function TargetPoseVisualizer() {
   const groupRef = useRef<THREE.Group>(null);
@@ -77,26 +80,22 @@ export default function TargetPoseVisualizer() {
   useFrame(() => {
     if (!groupRef.current) return;
 
-    // Show the INPUT cartesian pose using same coordinate convention as TargetTCPVisualizer
-    // Apply inverse transform: user space (X,Y,Z) → URDF world space (x,y,z)
-    // User space: X=x, Y=-z, Z=y
-    // Inverse: x=X, y=Z, z=-Y
-    // Convert mm to meters and update position
+    // Convert input pose from robot coordinates (Z-up) to Three.js (Y-up) for rendering
+    const threeJsPose = robotToThreeJs(inputCartesianPose);
+
+    // Set position in Three.js space (convert mm to meters)
     groupRef.current.position.set(
-      inputCartesianPose.X / 1000,   // x = X
-      inputCartesianPose.Z / 1000,   // y = Z (was Y)
-      -inputCartesianPose.Y / 1000   // z = -Y (was Z, negated)
+      threeJsPose.X / 1000,   // X (same in both)
+      threeJsPose.Y / 1000,   // Y (was robot Z)
+      threeJsPose.Z / 1000    // Z (was robot -Y)
     );
 
     // Update rotation from input orientation (convert degrees to radians)
-    // Apply rotation transform to match coordinate system:
-    // RX → rotation.x (around viewport X = user X)
-    // RZ → rotation.y (around viewport Y = user Z)
-    // -RY → rotation.z (around viewport Z = -user Y)
+    // TODO: May need rotation transformation in robotToThreeJs
     groupRef.current.rotation.set(
-      (inputCartesianPose.RX * Math.PI) / 180,
-      (inputCartesianPose.RZ * Math.PI) / 180,
-      -(inputCartesianPose.RY * Math.PI) / 180
+      (threeJsPose.RX * Math.PI) / 180,
+      (threeJsPose.RY * Math.PI) / 180,
+      (threeJsPose.RZ * Math.PI) / 180
     );
   });
 
