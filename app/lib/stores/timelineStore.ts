@@ -5,7 +5,7 @@
  */
 
 import { create } from 'zustand';
-import type { Keyframe, CartesianKeyframe, Timeline, PlaybackState, MotionMode, JointName, CartesianAxis } from '../types';
+import type { Keyframe, CartesianKeyframe, Timeline, PlaybackState, MotionMode, JointName, CartesianAxis, JointAngles, CartesianPose } from '../types';
 import { DEFAULT_DURATION, JOINT_NAMES, CARTESIAN_AXES } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -20,13 +20,13 @@ export interface TimelineStore {
   addKeyframe: (time: number, joint: JointName, value: number) => void;
   removeKeyframe: (id: string) => void;
   updateKeyframe: (id: string, updates: Partial<Keyframe>) => void;
-  recordKeyframes: () => void;
+  recordKeyframes: (jointAngles: JointAngles) => void;
 
   // Actions - Cartesian keyframe management
   addCartesianKeyframe: (time: number, axis: CartesianAxis, value: number) => void;
   removeCartesianKeyframe: (id: string) => void;
   updateCartesianKeyframe: (id: string, updates: Partial<CartesianKeyframe>) => void;
-  recordCartesianKeyframes: () => void;
+  recordCartesianKeyframes: (cartesianPose: CartesianPose) => void;
 
   // Actions - Playback control
   setCurrentTime: (time: number) => void;
@@ -96,21 +96,14 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
     }));
   },
 
-  recordKeyframes: () => {
+  recordKeyframes: (jointAngles) => {
     const state = get();
     const currentTime = state.playbackState.currentTime;
 
-    // Import inputStore to get current joint angles
-    // Note: This will be handled by components that call this action
-    // They should read from inputStore and pass values
-    // For now, we'll import the command store
-    import('./commandStore').then(({ useCommandStore }) => {
-      const commandedJointAngles = useCommandStore.getState().commandedJointAngles;
-
-      // Record 6 separate keyframes (one per joint) at current time
-      JOINT_NAMES.forEach((joint) => {
-        state.addKeyframe(currentTime, joint, commandedJointAngles[joint]);
-      });
+    // Record 6 separate keyframes (one per joint) at current time
+    // Joint angles are passed as parameter by the component
+    JOINT_NAMES.forEach((joint) => {
+      state.addKeyframe(currentTime, joint, jointAngles[joint]);
     });
   },
 
@@ -152,18 +145,14 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
     }));
   },
 
-  recordCartesianKeyframes: () => {
+  recordCartesianKeyframes: (cartesianPose) => {
     const state = get();
     const currentTime = state.playbackState.currentTime;
 
-    // Import inputStore to get current cartesian pose
-    import('./inputStore').then(({ useInputStore }) => {
-      const inputCartesianPose = useInputStore.getState().inputCartesianPose;
-
-      // Record 6 separate cartesian keyframes (one per axis) at current time
-      CARTESIAN_AXES.forEach((axis) => {
-        state.addCartesianKeyframe(currentTime, axis, inputCartesianPose[axis]);
-      });
+    // Record 6 separate cartesian keyframes (one per axis) at current time
+    // Cartesian pose is passed as parameter by the component
+    CARTESIAN_AXES.forEach((axis) => {
+      state.addCartesianKeyframe(currentTime, axis, cartesianPose[axis]);
     });
   },
 

@@ -3,7 +3,7 @@
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { useTimelineStore } from '../lib/store';
+import { useInputStore, useCommandStore, useHardwareStore } from '../lib/stores';
 import { JOINT_LIMITS, JOINT_NAMES } from '../lib/constants';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
@@ -15,18 +15,22 @@ export default function JointControlPanel() {
   const [speed, setSpeed] = useState(80);
   const [accel, setAccel] = useState(60);
 
-  const currentJointAngles = useTimelineStore((state) => state.currentJointAngles);
-  const setJointAngle = useTimelineStore((state) => state.setJointAngle);
+  const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
+  const setInputJointAngle = useInputStore((state) => state.setInputJointAngle);
+  const setCommandedJointAngle = useCommandStore((state) => state.setCommandedJointAngle);
 
-  // Mock actual values (in real app, these would come from robot telemetry)
-  const actualJointAngles = currentJointAngles; // For mockup, same as set values
+  // Get actual values from hardware store
+  const hardwareJointAngles = useHardwareStore((state) => state.hardwareJointAngles);
+  const actualJointAngles = hardwareJointAngles || commandedJointAngles; // Fallback to commanded if no hardware feedback
 
   const handleStepJoint = (joint: string, direction: number) => {
     const stepSize = 5.0; // degrees
-    const currentValue = currentJointAngles[joint as keyof typeof currentJointAngles];
+    const currentValue = commandedJointAngles[joint as keyof typeof commandedJointAngles];
     const limits = JOINT_LIMITS[joint as keyof typeof JOINT_LIMITS];
     const newValue = Math.max(limits.min, Math.min(limits.max, currentValue + (direction * stepSize)));
-    setJointAngle(joint as any, newValue);
+    // Update both input and commanded stores
+    setInputJointAngle(joint as any, newValue);
+    setCommandedJointAngle(joint as any, newValue);
   };
 
   return (
@@ -90,7 +94,7 @@ export default function JointControlPanel() {
       <div className="flex-1 overflow-y-auto space-y-4">
         {JOINT_NAMES.map((joint) => {
           const limits = JOINT_LIMITS[joint];
-          const setValue = currentJointAngles[joint];
+          const setValue = commandedJointAngles[joint];
           const actualValue = actualJointAngles[joint];
           const error = Math.abs(setValue - actualValue);
 
@@ -118,7 +122,10 @@ export default function JointControlPanel() {
                 </div>
                 <Slider
                   value={[setValue]}
-                  onValueChange={(value) => setJointAngle(joint as any, value[0])}
+                  onValueChange={(value) => {
+                    setInputJointAngle(joint as any, value[0]);
+                    setCommandedJointAngle(joint as any, value[0]);
+                  }}
                   min={limits.min}
                   max={limits.max}
                   step={0.1}

@@ -1,5 +1,5 @@
 import { Html } from '@react-three/drei';
-import { useTimelineStore } from '../lib/store';
+import { useCommandStore, useInputStore } from '../lib/stores';
 import { JOINT_LIMITS, JOINT_NAMES } from '../lib/constants';
 import * as THREE from 'three';
 
@@ -9,8 +9,8 @@ interface JointLabelsProps {
 }
 
 export default function JointLabels({ urdfRobot, visible = true }: JointLabelsProps) {
-  const currentJointAngles = useTimelineStore((state) => state.currentJointAngles);
-  const selectedJoint = useTimelineStore((state) => state.selectedJoint);
+  const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
+  const selectedJoint = useInputStore((state) => state.selectedJoint);
 
   if (!visible || !urdfRobot) return null;
 
@@ -80,7 +80,7 @@ export default function JointLabels({ urdfRobot, visible = true }: JointLabelsPr
         const position = getJointPosition(jointName);
         if (!position) return null;
 
-        const value = currentJointAngles[jointName];
+        const value = commandedJointAngles[jointName];
         const status = getJointStatus(jointName, value);
         const color = getStatusColor(status);
         const isSelected = selectedJoint === jointName;

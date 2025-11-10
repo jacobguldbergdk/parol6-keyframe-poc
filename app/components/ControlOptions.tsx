@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { useState } from 'react';
-import { useTimelineStore } from '../lib/store';
+import { useInputStore, useCommandStore, useHardwareStore } from '../lib/stores';
 import { Move, AlertTriangle, StopCircle } from 'lucide-react';
 import { getApiBaseUrl } from '../lib/apiConfig';
 import { moveJoints, movePose, moveCartesian } from '../lib/api';
@@ -16,16 +16,24 @@ export default function ControlOptions() {
   const [isHoming, setIsHoming] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
-  const stepAngle = useTimelineStore((state) => state.stepAngle);
-  const setStepAngle = useTimelineStore((state) => state.setStepAngle);
-  const currentJointAngles = useTimelineStore((state) => state.currentJointAngles);
-  const targetTcpPosition = useTimelineStore((state) => state.targetTcpPosition);
-  const robotStatus = useTimelineStore((state) => state.robotStatus);
-  const speed = useTimelineStore((state) => state.speed);
-  const setSpeed = useTimelineStore((state) => state.setSpeed);
-  const accel = useTimelineStore((state) => state.accel);
-  const setAccel = useTimelineStore((state) => state.setAccel);
-  const setJointAngle = useTimelineStore((state) => state.setJointAngle);
+
+  // Input store: Step angle for keyboard controls
+  const stepAngle = useInputStore((state) => state.stepAngle);
+  const setStepAngle = useInputStore((state) => state.setStepAngle);
+
+  // Command store: Commanded state and movement parameters
+  const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
+  const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
+  const speed = useCommandStore((state) => state.speed);
+  const setSpeed = useCommandStore((state) => state.setSpeed);
+  const accel = useCommandStore((state) => state.accel);
+  const setAccel = useCommandStore((state) => state.setAccel);
+  const setInputJointAngle = useInputStore((state) => state.setInputJointAngle);
+  const setCommandedJointAngle = useCommandStore((state) => state.setCommandedJointAngle);
+
+  // Hardware store: Robot status
+  const robotStatus = useHardwareStore((state) => state.robotStatus);
+
   const config = useConfigStore((state) => state.config);
 
   // Get all saved positions from config
@@ -34,7 +42,7 @@ export default function ControlOptions() {
   const handleMoveJoint = async () => {
     setIsMoving(true);
     try {
-      const result = await moveJoints(currentJointAngles, speed);
+      const result = await moveJoints(commandedJointAngles, speed);
       if (!result.success) {
         alert(`Failed to move robot (joint): ${result.error || 'Unknown error'}`);
       }
@@ -47,13 +55,13 @@ export default function ControlOptions() {
   };
 
   const handleMovePose = async () => {
-    if (!targetTcpPosition) {
+    if (!commandedTcpPose) {
       alert('Target position not available yet. Please wait for robot to load.');
       return;
     }
     setIsMoving(true);
     try {
-      const result = await movePose(targetTcpPosition, speed);
+      const result = await movePose(commandedTcpPose, speed);
       if (!result.success) {
         alert(`Failed to move robot (pose): ${result.error || 'Unknown error'}`);
       }
@@ -66,13 +74,13 @@ export default function ControlOptions() {
   };
 
   const handleMoveCartesian = async () => {
-    if (!targetTcpPosition) {
+    if (!commandedTcpPose) {
       alert('Target position not available yet. Please wait for robot to load.');
       return;
     }
     setIsMoving(true);
     try {
-      const result = await moveCartesian(targetTcpPosition, speed);
+      const result = await moveCartesian(commandedTcpPose, speed);
       if (!result.success) {
         alert(`Failed to move robot (cartesian): ${result.error || 'Unknown error'}`);
       }
@@ -158,9 +166,10 @@ export default function ControlOptions() {
   };
 
   const handleGoToPosition = (joints: { J1: number; J2: number; J3: number; J4: number; J5: number; J6: number }) => {
-    // Set target robot to specified position
+    // Set both input and commanded positions
     Object.entries(joints).forEach(([joint, angle]) => {
-      setJointAngle(joint as any, angle);
+      setInputJointAngle(joint as any, angle);
+      setCommandedJointAngle(joint as any, angle);
     });
   };
 

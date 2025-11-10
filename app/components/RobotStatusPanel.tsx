@@ -1,26 +1,26 @@
 'use client';
 
 import { Card } from '@/components/ui/card';
-import { useTimelineStore } from '../lib/store';
+import { useHardwareStore } from '../lib/stores';
 import { useEffect, useState } from 'react';
 
 export default function RobotStatusPanel() {
-  // Get real hardware feedback from store
-  const connectionStatus = useTimelineStore((state) => state.connectionStatus);
-  const actualCartesianPose = useTimelineStore((state) => state.actualCartesianPose);
-  const ioStatus = useTimelineStore((state) => state.ioStatus);
-  const gripperStatus = useTimelineStore((state) => state.gripperStatus);
-  const robotStatus = useTimelineStore((state) => state.robotStatus);
+  // Get real hardware feedback from hardware store
+  const connectionStatus = useHardwareStore((state) => state.connectionStatus);
+  const hardwareCartesianPose = useHardwareStore((state) => state.hardwareCartesianPose);
+  const ioStatus = useHardwareStore((state) => state.ioStatus);
+  const gripperStatus = useHardwareStore((state) => state.gripperStatus);
+  const robotStatus = useHardwareStore((state) => state.robotStatus);
 
   const [lastUpdate, setLastUpdate] = useState<string>('N/A');
 
   // Update timestamp when any data changes
   useEffect(() => {
-    if (actualCartesianPose || ioStatus || gripperStatus) {
+    if (hardwareCartesianPose || ioStatus || gripperStatus) {
       const now = new Date();
       setLastUpdate(now.toLocaleTimeString());
     }
-  }, [actualCartesianPose, ioStatus, gripperStatus]);
+  }, [hardwareCartesianPose, ioStatus, gripperStatus]);
 
   return (
     <Card className="p-3 h-full flex flex-col overflow-hidden">

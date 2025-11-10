@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useFrame, ThreeEvent } from '@react-three/fiber';
-import { useTimelineStore } from '../lib/store';
+import { useInputStore } from '../lib/stores';
 import { useJointContextMenu } from './JointContextMenu';
 import type { JointName } from '../lib/types';
 
@@ -9,7 +9,7 @@ interface InteractiveRobotMeshesProps {
 }
 
 export default function InteractiveRobotMeshes({ robot }: InteractiveRobotMeshesProps) {
-  const setSelectedJoint = useTimelineStore((state) => state.setSelectedJoint);
+  const setSelectedJoint = useInputStore((state) => state.setSelectedJoint);
   const { show: showContextMenu } = useJointContextMenu();
 
   useEffect(() => {

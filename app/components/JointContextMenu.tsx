@@ -2,7 +2,7 @@
 
 import { Menu, Item, useContextMenu } from 'react-contexify';
 import 'react-contexify/dist/ReactContexify.css';
-import { useTimelineStore } from '../lib/store';
+import { useInputStore, useCommandStore } from '../lib/stores';
 import { JOINT_LIMITS } from '../lib/constants';
 import type { JointName } from '../lib/types';
 
@@ -13,7 +13,13 @@ interface MenuData {
 }
 
 export function JointContextMenu() {
-  const setJointAngle = useTimelineStore((state) => state.setJointAngle);
+  const setInputJointAngle = useInputStore((state) => state.setInputJointAngle);
+  const setCommandedJointAngle = useCommandStore((state) => state.setCommandedJointAngle);
+
+  const setJointAngle = (joint: JointName, value: number) => {
+    setInputJointAngle(joint, value);
+    setCommandedJointAngle(joint, value);
+  };
 
   const handleHome = ({ props }: { props: MenuData }) => {
     if (props && props.jointName) {
