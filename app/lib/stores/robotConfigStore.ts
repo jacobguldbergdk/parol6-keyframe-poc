@@ -5,11 +5,13 @@
 
 import { create } from 'zustand';
 import type { IkAxisMask } from '../types';
+import { useTimelineStore } from './timelineStore';
 
 export interface RobotConfigStore {
-  // TCP (Tool Center Point) offset from J6 reference frame (in millimeters)
+  // TCP (Tool Center Point) offset from J6 reference frame
+  // Position offset in millimeters, orientation offset in degrees
   // User-adjustable to match different tools
-  tcpOffset: { x: number; y: number; z: number };
+  tcpOffset: { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 
   // IK axis mask - selectively enable/disable axes during IK solving
   // Default: Full 6DoF (all axes enabled)
@@ -22,7 +24,7 @@ export interface RobotConfigStore {
   commanderRobotTransparency: number; // Commander robot transparency (0-1)
 
   // Actions
-  setTcpOffset: (axis: 'x' | 'y' | 'z', value: number) => void;
+  setTcpOffset: (axis: 'x' | 'y' | 'z' | 'rx' | 'ry' | 'rz', value: number) => void;
   setIkAxisMask: (updates: Partial<IkAxisMask>) => void;
   setHardwareRobotColor: (color: string) => void;
   setHardwareRobotTransparency: (transparency: number) => void;
@@ -32,7 +34,7 @@ export interface RobotConfigStore {
 
 export const useRobotConfigStore = create<RobotConfigStore>((set) => ({
   // Initial state
-  tcpOffset: { x: 47, y: 0, z: -62 },
+  tcpOffset: { x: 47, y: 0, z: -62, rx: 0, ry: 0, rz: 0 },
   ikAxisMask: { X: true, Y: true, Z: true, RX: true, RY: true, RZ: true },
   hardwareRobotColor: '#808080',
   hardwareRobotTransparency: 0.35,
@@ -47,6 +49,9 @@ export const useRobotConfigStore = create<RobotConfigStore>((set) => ({
         [axis]: value
       }
     }));
+
+    // Invalidate trajectory cache since TCP offset affects IK results
+    useTimelineStore.getState().invalidateTrajectoryCache();
   },
 
   setIkAxisMask: (updates) => {
@@ -56,6 +61,9 @@ export const useRobotConfigStore = create<RobotConfigStore>((set) => ({
         ...updates
       }
     }));
+
+    // Invalidate trajectory cache since IK axis mask affects IK results
+    useTimelineStore.getState().invalidateTrajectoryCache();
   },
 
   setHardwareRobotColor: (color) => set({ hardwareRobotColor: color }),

@@ -12,8 +12,9 @@ import { JointAngles } from '../lib/types';
 import { moveJoints } from '../lib/api';
 import { getJointAnglesAtTime } from '../lib/interpolation';
 import { JOINT_NAMES } from '../lib/constants';
+import { logger } from '../lib/logger';
 
-const POSITION_TOLERANCE_DEGREES = 0.1; // 0.1 degree tolerance
+const POSITION_TOLERANCE_DEGREES = 0.5; // 0.5 degree tolerance (accounts for sensor noise + WebSocket latency)
 const MOVE_SPEED_PERCENTAGE = 50; // Fixed 50% speed for pre-move
 const POLL_INTERVAL_MS = 100; // Check position every 100ms
 const TIMEOUT_MS = 60000; // 60 second safety timeout
@@ -36,7 +37,6 @@ export function usePrePlaybackPosition() {
 
   const hardwareJointAngles = useHardwareStore((state) => state.hardwareJointAngles);
   const keyframes = useTimelineStore((state) => state.timeline.keyframes);
-  const motionMode = useTimelineStore((state) => state.timeline.mode);
   const play = useTimelineStore((state) => state.play);
 
   /**
@@ -57,23 +57,16 @@ export function usePrePlaybackPosition() {
    * Move to start position and then start playback
    */
   const moveToStartAndPlay = async () => {
-    // Only works in joint mode for now
-    if (motionMode !== 'joint') {
-      console.error('[PrePlayback] Cartesian mode not yet supported for pre-playback positioning');
-      setMoveError('Pre-playback positioning only works in joint mode');
-      return;
-    }
-
     // Check if robot is connected
     if (!hardwareJointAngles) {
-      console.error('[PrePlayback] Robot not connected - cannot execute playback');
+      logger.error('Robot not connected - cannot execute playback', 'PrePlayback');
       setMoveError('Robot not connected. Please connect robot before executing playback.');
       return;
     }
 
     // Get t=0 target position
     if (keyframes.length === 0) {
-      console.error('[PrePlayback] No keyframes found');
+      logger.error('No keyframes found', 'PrePlayback');
       setMoveError('No keyframes to play');
       return;
     }
@@ -98,6 +91,15 @@ export function usePrePlaybackPosition() {
         throw new Error(result.error || 'Move command failed');
       }
 
+      // Immediate re-check: position may have updated while sending move command
+      // This handles the common case where WebSocket data was stale but updated during the command
+      const immediateCheck = useHardwareStore.getState().hardwareJointAngles;
+      if (immediateCheck && isAtPosition(immediateCheck, targetPosition, POSITION_TOLERANCE_DEGREES)) {
+        setIsMovingToStart(false);
+        play(true);
+        return;
+      }
+
       // Poll for position arrival
       return new Promise<void>((resolve, reject) => {
         let startTime = Date.now();
@@ -106,7 +108,7 @@ export function usePrePlaybackPosition() {
         timeoutRef.current = setTimeout(() => {
           clearTimers();
           const error = 'Timeout waiting for robot to reach start position (60s)';
-          console.error('[PrePlayback]', error);
+          logger.error('Error during pre-move', 'PrePlayback', error);
           setMoveError(error);
           setIsMovingToStart(false);
           reject(new Error(error));
@@ -119,7 +121,7 @@ export function usePrePlaybackPosition() {
           if (!currentActual) {
             clearTimers();
             const error = 'Lost connection to robot during pre-move';
-            console.error('[PrePlayback]', error);
+            logger.error('Error during pre-move', 'PrePlayback', error);
             setMoveError(error);
             setIsMovingToStart(false);
             reject(new Error(error));
@@ -141,7 +143,7 @@ export function usePrePlaybackPosition() {
     } catch (error) {
       clearTimers();
       const errorMsg = error instanceof Error ? error.message : 'Unknown error during pre-move';
-      console.error('[PrePlayback] Error:', errorMsg);
+      logger.error('Error', 'PrePlayback', { errorMsg });
       setMoveError(errorMsg);
       setIsMovingToStart(false);
     }

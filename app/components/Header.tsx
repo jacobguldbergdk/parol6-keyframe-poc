@@ -6,10 +6,10 @@ import { cn } from '@/lib/utils';
 
 const tabs = [
   { name: 'Control', href: '/control' },
-  { name: 'Timeline', href: '/' },
-  { name: 'I/O', href: '/io' },
-  { name: 'Gripper', href: '/gripper' },
+  { name: 'Configuration', href: '/configuration' },
+  { name: 'Camera', href: '/camera' },
   { name: 'Logs', href: '/logs' },
+  { name: 'Performance', href: '/performance' },
   { name: 'Settings', href: '/settings' },
 ];
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRobotWebSocket } from '../hooks/useRobotWebSocket';
 import { useHardwareStore, useCommandStore } from '../lib/stores';
 import { useConfigStore } from '../lib/configStore';
@@ -35,6 +35,9 @@ export default function WebSocketConnector() {
   // Get homing action from command store (for visual coloring)
   const setJointHomed = useCommandStore((state) => state.setJointHomed);
 
+  // Track timestamp of last hardware data update
+  const lastHardwareUpdateRef = useRef<number | null>(null);
+
   // Update connection status when it changes
   useEffect(() => {
     setConnectionStatus(connectionState);
@@ -54,6 +57,8 @@ export default function WebSocketConnector() {
         J5: angles[4],
         J6: angles[5],
       });
+      // Update timestamp
+      lastHardwareUpdateRef.current = Date.now();
     }
   }, [robotData.joints, setHardwareJointAngles]);
 
@@ -68,6 +73,8 @@ export default function WebSocketConnector() {
         RY: robotData.pose.pitch,
         RZ: robotData.pose.yaw,
       });
+      // Update timestamp
+      lastHardwareUpdateRef.current = Date.now();
     }
   }, [robotData.pose, setHardwareCartesianPose]);
 
@@ -103,6 +110,27 @@ export default function WebSocketConnector() {
       });
     }
   }, [robotData.status?.homed, setJointHomed]);
+
+  // Timeout detection - clear hardware data if no updates received
+  useEffect(() => {
+    const timeoutMs = config?.frontend?.websocket?.hardware_data_timeout_ms || 3000;
+
+    // Check every 500ms (half the timeout for responsiveness)
+    const interval = setInterval(() => {
+      if (lastHardwareUpdateRef.current !== null) {
+        const elapsed = Date.now() - lastHardwareUpdateRef.current;
+
+        if (elapsed > timeoutMs) {
+          // Timeout exceeded - clear hardware data
+          setHardwareJointAngles(null);
+          setHardwareCartesianPose(null);
+          lastHardwareUpdateRef.current = null;
+        }
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [config, setHardwareJointAngles, setHardwareCartesianPose]);
 
   // This component renders nothing - it only manages WebSocket connection
   return null;

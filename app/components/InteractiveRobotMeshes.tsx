@@ -47,20 +47,6 @@ export default function InteractiveRobotMeshes({ robot }: InteractiveRobotMeshes
     }
   };
 
-  // Render transparent clickable overlays for each mesh
-  useFrame(() => {
-    if (!robot) return;
-
-    robot.traverse((child: any) => {
-      if (child.isMesh && child.userData.jointName) {
-        // Ensure material is set up for interaction
-        if (child.material) {
-          child.material.needsUpdate = true;
-        }
-      }
-    });
-  });
-
   return (
     <primitive
       object={robot}

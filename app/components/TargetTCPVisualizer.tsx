@@ -26,11 +26,14 @@ export default function TargetTCPVisualizer() {
   // Reusable objects to prevent memory leaks (don't create new objects every frame!)
   const l6WorldPosition = useRef(new THREE.Vector3());
   const l6WorldQuaternion = useRef(new THREE.Quaternion());
+  const tcpRotationQuat = useRef(new THREE.Quaternion());
+  const tcpRotationEuler = useRef(new THREE.Euler());
+  const postRotationQuat = useRef(new THREE.Quaternion());
   const localOffset = useRef(new THREE.Vector3());
   const worldOffset = useRef(new THREE.Vector3());
   const tcpWorldPosition = useRef(new THREE.Vector3());
 
-  const targetRobotRef = useCommandStore((state) => state.targetRobotRef);
+  const commanderRobotRef = useCommandStore((state) => state.commanderRobotRef);
   const tcpOffset = useRobotConfigStore((state) => state.tcpOffset);
 
   // Create arrows on mount with distinct styling
@@ -44,10 +47,11 @@ export default function TargetTCPVisualizer() {
 
     // Orange/Cyan/Magenta color scheme for TARGET (target robot)
     // Different from cartesian input (red/green/blue) and actual (yellow/lime/purple)
+    // Standard orientation - TCP rotation quaternion handles all transformations
 
-    // X axis - Orange (swapped: now points in negative Z direction)
+    // X axis - Orange (standard +X direction)
     xArrowRef.current = new THREE.ArrowHelper(
-      new THREE.Vector3(0, 0, -1),  // X arrow points in negative Z direction
+      new THREE.Vector3(1, 0, 0),  // Standard X direction
       new THREE.Vector3(0, 0, 0),
       arrowLength,
       0xff8800, // Orange
@@ -55,9 +59,9 @@ export default function TargetTCPVisualizer() {
       arrowHeadWidth
     );
 
-    // Y axis - Cyan (labeled Y, flipped direction)
+    // Y axis - Cyan (standard +Y direction)
     yArrowRef.current = new THREE.ArrowHelper(
-      new THREE.Vector3(0, -1, 0),  // Flipped: negated Y direction
+      new THREE.Vector3(0, 1, 0),  // Standard Y direction
       new THREE.Vector3(0, 0, 0),
       arrowLength,
       0x00dddd, // Cyan
@@ -65,9 +69,9 @@ export default function TargetTCPVisualizer() {
       arrowHeadWidth
     );
 
-    // Z axis - Fuchsia (swapped: now points in negative X direction)
+    // Z axis - Magenta (standard +Z direction)
     zArrowRef.current = new THREE.ArrowHelper(
-      new THREE.Vector3(-1, 0, 0),  // Z arrow points in negative X direction
+      new THREE.Vector3(0, 0, 1),  // Standard Z direction
       new THREE.Vector3(0, 0, 0),
       arrowLength,
       0xdd00dd, // Magenta/Fuchsia
@@ -96,19 +100,19 @@ export default function TargetTCPVisualizer() {
     };
   }, []);
 
-  // Update target TCP position every frame from main URDF robot model
+  // Update commander TCP position every frame from commander URDF robot model
   useFrame(() => {
-    if (!groupRef.current || !targetRobotRef) return;
+    if (!groupRef.current || !commanderRobotRef) return;
 
     // Calculate TCP pose from URDF (returns Three.js coordinates)
-    const threeJsPose = calculateTcpPoseFromUrdf(targetRobotRef, tcpOffset);
+    const threeJsPose = calculateTcpPoseFromUrdf(commanderRobotRef, tcpOffset);
     if (!threeJsPose) return;
 
     // Convert Three.js coordinates (Y-up) to robot coordinates (Z-up) for store
     const robotPose = threeJsToRobot(threeJsPose);
 
     // Update visual arrow group position (for rendering in Three.js space)
-    const l6Link = targetRobotRef.links['L6'];
+    const l6Link = commanderRobotRef.links['L6'];
     if (l6Link) {
       l6Link.updateMatrixWorld(true);
 
@@ -126,7 +130,27 @@ export default function TargetTCPVisualizer() {
       tcpWorldPosition.current.copy(l6WorldPosition.current).add(worldOffset.current);
 
       groupRef.current.position.copy(tcpWorldPosition.current);
+
+      // Apply TCP orientation offset to gizmo
+      // Start with L6 orientation
       groupRef.current.quaternion.copy(l6WorldQuaternion.current);
+
+      // Apply user-configurable TCP rotation
+      if (tcpOffset.rx !== 0 || tcpOffset.ry !== 0 || tcpOffset.rz !== 0) {
+        tcpRotationEuler.current.set(
+          tcpOffset.rx * Math.PI / 180,
+          tcpOffset.ry * Math.PI / 180,
+          tcpOffset.rz * Math.PI / 180,
+          'XYZ'
+        );
+        tcpRotationQuat.current.setFromEuler(tcpRotationEuler.current);
+        groupRef.current.quaternion.multiply(tcpRotationQuat.current);
+      }
+
+      // Apply fixed post-rotation: -90° around Z axis
+      // This aligns the standard arrows with the display coordinate system
+      postRotationQuat.current.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2);
+      groupRef.current.quaternion.multiply(postRotationQuat.current);
     }
 
     // Store robot coordinates (Z-up) in store - only update if position changed

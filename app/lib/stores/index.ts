@@ -20,3 +20,6 @@ export type { TimelineStore } from './timelineStore';
 
 export { useRobotConfigStore } from './robotConfigStore';
 export type { RobotConfigStore } from './robotConfigStore';
+
+export { usePerformanceStore } from './performanceStore';
+export type { PerformanceStore, PerformanceRecording, RecordingListItem, CommandPerformance } from './performanceStore';

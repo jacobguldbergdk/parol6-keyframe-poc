@@ -16,7 +16,18 @@ export interface TCPOffset {
   x: number;
   y: number;
   z: number;
+  rx: number;  // Orientation offset around X-axis (degrees)
+  ry: number;  // Orientation offset around Y-axis (degrees)
+  rz: number;  // Orientation offset around Z-axis (degrees)
 }
+
+// Reusable objects to avoid creating new instances every frame (60fps)
+// This prevents 300-420 allocations per second
+const _tempVector3 = new THREE.Vector3();
+const _tempVector3_2 = new THREE.Vector3();
+const _tempQuaternion = new THREE.Quaternion();
+const _tempQuaternion_2 = new THREE.Quaternion();
+const _tempEuler = new THREE.Euler();
 
 /**
  * Calculate TCP pose from URDF robot model in Three.js coordinate space
@@ -44,51 +55,69 @@ export function calculateTcpPoseFromUrdf(
     // Update world matrix to ensure transforms are current
     l6Link.updateMatrixWorld(true);
 
-    // Get world position of L6 link
-    const l6WorldPosition = new THREE.Vector3();
-    l6Link.getWorldPosition(l6WorldPosition);
+    // Get world position of L6 link (reuse temp object)
+    l6Link.getWorldPosition(_tempVector3);
 
-    // Get world rotation
-    const l6WorldQuaternion = new THREE.Quaternion();
-    l6Link.getWorldQuaternion(l6WorldQuaternion);
+    // Get world rotation (reuse temp object)
+    l6Link.getWorldQuaternion(_tempQuaternion);
 
     // Apply TCP offset in L6's local coordinate frame
-    // Convert mm to meters
-    const localOffset = new THREE.Vector3(
+    // Convert mm to meters (reuse second temp vector)
+    _tempVector3_2.set(
       tcpOffset.x / 1000,
       tcpOffset.y / 1000,
       tcpOffset.z / 1000
     );
 
     // Transform offset from L6 local space to world space
-    const worldOffset = localOffset.applyQuaternion(l6WorldQuaternion);
+    _tempVector3_2.applyQuaternion(_tempQuaternion);
 
     // Final TCP position = L6 position + transformed offset
-    const tcpWorldPosition = l6WorldPosition.add(worldOffset);
+    _tempVector3.add(_tempVector3_2);
+
+    // Apply TCP orientation offset (rx, ry, rz in degrees)
+    // This rotates the TCP frame at the translated point
+    if (tcpOffset.rx !== 0 || tcpOffset.ry !== 0 || tcpOffset.rz !== 0) {
+      // Convert degrees to radians and create rotation
+      _tempEuler.set(
+        tcpOffset.rx * Math.PI / 180,
+        tcpOffset.ry * Math.PI / 180,
+        tcpOffset.rz * Math.PI / 180,
+        'XYZ'
+      );
+      _tempQuaternion_2.setFromEuler(_tempEuler);
+
+      // Apply TCP rotation: new_orientation = L6_orientation * TCP_rotation
+      _tempQuaternion.multiply(_tempQuaternion_2);
+    }
 
     // Transform orientation from world frame to viewport frame (if enabled)
     // The robot parent has rotation={[-Math.PI/2, 0, 0]} (rotated -90° around X)
-    let quaternionToUse = l6WorldQuaternion;
-
+    // Use _tempQuaternion2 for the final quaternion to use
     if (ORIENTATION_CONFIG.applyQuaternionTransform) {
       // Apply inverse of parent rotation to undo coordinate frame transformation
-      const parentRotation = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(-Math.PI / 2, 0, 0, 'XYZ')  // The actual parent rotation
-      );
-      const parentRotationInverse = parentRotation.clone().invert();
-      quaternionToUse = parentRotationInverse.clone().multiply(l6WorldQuaternion);
+      // Reuse _tempEuler for parent rotation
+      _tempEuler.set(-Math.PI / 2, 0, 0, 'XYZ');
+      _tempQuaternion_2.setFromEuler(_tempEuler);
+
+      // Invert and multiply (result in _tempQuaternion_2)
+      _tempQuaternion_2.invert();
+      _tempQuaternion_2.multiply(_tempQuaternion);
+    } else {
+      // Just copy the L6 quaternion
+      _tempQuaternion_2.copy(_tempQuaternion);
     }
 
-    // Extract Euler angles using configured order
-    const euler = new THREE.Euler().setFromQuaternion(
-      quaternionToUse,
+    // Extract Euler angles using configured order (reuse _tempEuler)
+    _tempEuler.setFromQuaternion(
+      _tempQuaternion_2,
       ORIENTATION_CONFIG.eulerOrder
     );
 
     // Apply orientation offset and negation
-    const rx_raw = (euler.x * 180) / Math.PI;
-    const ry_raw = (euler.y * 180) / Math.PI;
-    const rz_raw = (euler.z * 180) / Math.PI;
+    const rx_raw = (_tempEuler.x * 180) / Math.PI;
+    const ry_raw = (_tempEuler.y * 180) / Math.PI;
+    const rz_raw = (_tempEuler.z * 180) / Math.PI;
 
     // Apply orientation offset and negation
     const rx_final = (ORIENTATION_CONFIG.negateRX ? -1 : 1) * (rx_raw - ORIENTATION_CONFIG.offset.RX);
@@ -99,9 +128,9 @@ export function calculateTcpPoseFromUrdf(
     // The URDF is already rendered with rotation wrapper, so these are in rotated space
     // Callers must use coordinateTransform.threeJsToRobot() to get robot coordinates
     return {
-      X: tcpWorldPosition.x * 1000,      // X in Three.js space (same as robot X)
-      Y: tcpWorldPosition.y * 1000,      // Y in Three.js space (up direction, was robot Z)
-      Z: tcpWorldPosition.z * 1000,      // Z in Three.js space (backward, was robot -Y)
+      X: _tempVector3.x * 1000,      // X in Three.js space (same as robot X)
+      Y: _tempVector3.y * 1000,      // Y in Three.js space (up direction, was robot Z)
+      Z: _tempVector3.z * 1000,      // Z in Three.js space (backward, was robot -Y)
       RX: rx_final,
       RY: ry_final,
       RZ: rz_final

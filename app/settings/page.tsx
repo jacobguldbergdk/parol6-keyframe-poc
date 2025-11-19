@@ -14,10 +14,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Slider } from '@/components/ui/slider';
 import { Save, RotateCcw, AlertCircle, Loader2, Plus, Pencil, Trash2 } from 'lucide-react';
 import { useConfigStore, Config } from '../lib/configStore';
+import { useCommandStore, useHardwareStore } from '../lib/stores';
 import { getApiBaseUrl } from '../lib/apiConfig';
 import { JOINT_LIMITS } from '../lib/constants';
+import { logger } from '../lib/logger';
 
 export default function SettingsPage() {
   const { config, isLoading, error, fetchConfig, saveConfig } = useConfigStore();
@@ -30,6 +33,14 @@ export default function SettingsPage() {
   // Saved position editor state
   const [editingPosition, setEditingPosition] = useState<{ index: number; name: string; joints: number[] } | null>(null);
   const [isAddingPosition, setIsAddingPosition] = useState(false);
+
+  // Runtime controls
+  const accel = useCommandStore((state) => state.accel);
+  const setAccel = useCommandStore((state) => state.setAccel);
+
+  // Hardware status
+  const ioStatus = useHardwareStore((state) => state.ioStatus);
+  const gripperStatus = useHardwareStore((state) => state.gripperStatus);
 
   // Fetch config on mount
   useEffect(() => {
@@ -47,8 +58,8 @@ export default function SettingsPage() {
           setAvailablePorts(data.ports || []);
         }
       } catch (error) {
-        console.error('Failed to fetch COM ports:', error);
-      } finally {
+        logger.error('Failed to fetch COM ports', 'SettingsPage', error);
+      } finally{
         setLoadingPorts(false);
       }
     };
@@ -292,6 +303,24 @@ export default function SettingsPage() {
                 />
               </div>
 
+              {/* Runtime Acceleration Control */}
+              <div className="grid grid-cols-3 items-center gap-4">
+                <Label>Current Accel %</Label>
+                <div className="col-span-2 flex items-center gap-2">
+                  <Slider
+                    value={[accel]}
+                    onValueChange={(value) => setAccel(value[0])}
+                    min={0}
+                    max={100}
+                    step={1}
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground w-12 text-right">
+                    {accel}%
+                  </span>
+                </div>
+              </div>
+
               {/* Step Angle */}
               <div className="grid grid-cols-3 items-center gap-4">
                 <Label>Step Angle (degrees)</Label>
@@ -334,43 +363,6 @@ export default function SettingsPage() {
                       updateConfig(['ui', 'show_safety_warnings'], checked)
                     }
                   />
-                </div>
-              </div>
-
-              {/* TCP Offset */}
-              <div className="space-y-2">
-                <Label>TCP Offset (mm)</Label>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <Label className="text-xs text-muted-foreground">X</Label>
-                    <Input
-                      type="number"
-                      value={localConfig.ui.tcp_offset.x}
-                      onChange={(e) =>
-                        updateConfig(['ui', 'tcp_offset', 'x'], parseFloat(e.target.value))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Y</Label>
-                    <Input
-                      type="number"
-                      value={localConfig.ui.tcp_offset.y}
-                      onChange={(e) =>
-                        updateConfig(['ui', 'tcp_offset', 'y'], parseFloat(e.target.value))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Z</Label>
-                    <Input
-                      type="number"
-                      value={localConfig.ui.tcp_offset.z}
-                      onChange={(e) =>
-                        updateConfig(['ui', 'tcp_offset', 'z'], parseFloat(e.target.value))
-                      }
-                    />
-                  </div>
                 </div>
               </div>
             </div>
@@ -649,12 +641,32 @@ export default function SettingsPage() {
           <Card className="p-6">
             <h2 className="text-xl font-semibold mb-4">Logging Settings</h2>
             <div className="space-y-4">
-              {/* Log Level */}
+              {/* Commander Log Level */}
               <div className="grid grid-cols-3 items-center gap-4">
-                <Label>Log Level</Label>
+                <Label>Commander Log Level</Label>
                 <Select
-                  value={localConfig.logging.level}
-                  onValueChange={(value) => updateConfig(['logging', 'level'], value)}
+                  value={localConfig.logging.commander?.level || 'INFO'}
+                  onValueChange={(value) => updateConfig(['logging', 'commander', 'level'], value)}
+                >
+                  <SelectTrigger className="col-span-2">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="DEBUG">DEBUG</SelectItem>
+                    <SelectItem value="INFO">INFO</SelectItem>
+                    <SelectItem value="WARNING">WARNING</SelectItem>
+                    <SelectItem value="ERROR">ERROR</SelectItem>
+                    <SelectItem value="CRITICAL">CRITICAL</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* API Log Level */}
+              <div className="grid grid-cols-3 items-center gap-4">
+                <Label>API Log Level</Label>
+                <Select
+                  value={localConfig.logging.api?.level || 'INFO'}
+                  onValueChange={(value) => updateConfig(['logging', 'api', 'level'], value)}
                 >
                   <SelectTrigger className="col-span-2">
                     <SelectValue />
@@ -789,6 +801,103 @@ export default function SettingsPage() {
                   onChange={(e) => updateConfig(['api', 'port'], parseInt(e.target.value))}
                   className="col-span-2"
                 />
+              </div>
+            </div>
+          </Card>
+
+          {/* Runtime Controls */}
+          <Card className="p-6">
+            <h2 className="text-lg font-semibold mb-4">Runtime Controls</h2>
+            <div className="space-y-4">
+              {/* Acceleration Slider */}
+              <div>
+                <Label className="text-sm font-medium mb-2 block">
+                  Acceleration: {accel}%
+                </Label>
+                <Slider
+                  value={[accel]}
+                  onValueChange={(value) => setAccel(value[0])}
+                  min={0}
+                  max={100}
+                  step={1}
+                  className="w-full"
+                />
+              </div>
+            </div>
+          </Card>
+
+          {/* I/O Status */}
+          <Card className="p-6">
+            <h2 className="text-lg font-semibold mb-4">I/O Status</h2>
+            <div className="space-y-3 text-sm">
+              {/* Digital I/O */}
+              <div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className={ioStatus?.input_1 ? 'text-green-500' : 'text-gray-400'}>
+                      {ioStatus?.input_1 ? '●' : '○'}
+                    </span>
+                    <span className="text-muted-foreground">IN1:</span>
+                    <span className="font-mono">({!ioStatus ? 'N/A' : ioStatus.input_1 ? '1' : '0'})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={ioStatus?.output_1 ? 'text-green-500' : 'text-gray-400'}>
+                      {ioStatus?.output_1 ? '●' : '○'}
+                    </span>
+                    <span className="text-muted-foreground">OUT1:</span>
+                    <span className="font-mono">({!ioStatus ? 'N/A' : ioStatus.output_1 ? '1' : '0'})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={ioStatus?.input_2 ? 'text-green-500' : 'text-gray-400'}>
+                      {ioStatus?.input_2 ? '●' : '○'}
+                    </span>
+                    <span className="text-muted-foreground">IN2:</span>
+                    <span className="font-mono">({!ioStatus ? 'N/A' : ioStatus.input_2 ? '1' : '0'})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={ioStatus?.output_2 ? 'text-green-500' : 'text-gray-400'}>
+                      {ioStatus?.output_2 ? '●' : '○'}
+                    </span>
+                    <span className="text-muted-foreground">OUT2:</span>
+                    <span className="font-mono">({!ioStatus ? 'N/A' : ioStatus.output_2 ? '1' : '0'})</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mt-3">
+                  <span className={!ioStatus ? 'text-gray-500' :
+                                 !ioStatus.estop_pressed ? 'text-blue-500' : 'text-red-500'}>
+                    {!ioStatus ? '-' :
+                     !ioStatus.estop_pressed ? '✓' : '✗'}
+                  </span>
+                  <span className="text-muted-foreground">E-STOP:</span>
+                  <span className="font-medium">
+                    {!ioStatus ? 'N/A' :
+                     !ioStatus.estop_pressed ? 'OK' : 'PRESSED'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Gripper Status */}
+              <div className="pt-3 border-t">
+                <h3 className="font-semibold mb-2 text-sm">Gripper</h3>
+                <div className="flex items-center gap-4 text-sm font-mono">
+                  <div>
+                    <span className="text-muted-foreground">ID:</span>{' '}
+                    <span>{gripperStatus?.device_id ?? 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Pos:</span>{' '}
+                    <span>{gripperStatus?.position ?? 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Obj:</span>{' '}
+                    <span>
+                      {gripperStatus ?
+                        (gripperStatus.object_detected === 0 ? 'none' :
+                         gripperStatus.object_detected === 1 ? 'closing' : 'opening')
+                        : 'N/A'}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </Card>

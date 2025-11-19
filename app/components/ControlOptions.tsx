@@ -2,95 +2,55 @@
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useState } from 'react';
-import { useInputStore, useCommandStore, useHardwareStore } from '../lib/stores';
-import { Move, AlertTriangle, StopCircle } from 'lucide-react';
+import { useCommandStore, useHardwareStore, useInputStore, usePerformanceStore, useRobotConfigStore } from '../lib/stores';
+import { useKinematicsStore } from '../lib/stores/kinematicsStore';
+import { AlertTriangle, StopCircle, Target, Copy, Circle } from 'lucide-react';
 import { getApiBaseUrl } from '../lib/apiConfig';
-import { moveJoints, movePose, moveCartesian } from '../lib/api';
-import { getAllPositions } from '../lib/positions';
-import { useConfigStore } from '../lib/configStore';
+import { executeTrajectory } from '../lib/api';
+import { JointAngles, JointName } from '../lib/types';
+import { generateCartesianWaypoints, calculateWaypointCount } from '../lib/cartesianPlanner';
+import { inverseKinematicsDetailed } from '../lib/kinematics';
+import { logger } from '../lib/logger';
 
 export default function ControlOptions() {
   const [isMoving, setIsMoving] = useState(false);
   const [isHoming, setIsHoming] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
-
-  // Input store: Step angle for keyboard controls
-  const stepAngle = useInputStore((state) => state.stepAngle);
-  const setStepAngle = useInputStore((state) => state.setStepAngle);
+  const [isMovingCartesianBackend, setIsMovingCartesianBackend] = useState(false);
 
   // Command store: Commanded state and movement parameters
-  const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
-  const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
   const speed = useCommandStore((state) => state.speed);
-  const setSpeed = useCommandStore((state) => state.setSpeed);
-  const accel = useCommandStore((state) => state.accel);
-  const setAccel = useCommandStore((state) => state.setAccel);
-  const setInputJointAngle = useInputStore((state) => state.setInputJointAngle);
+  const commandedJoints = useCommandStore((state) => state.commandedJointAngles);
   const setCommandedJointAngle = useCommandStore((state) => state.setCommandedJointAngle);
 
-  // Hardware store: Robot status
+  // Hardware store: Robot status and hardware angles
   const robotStatus = useHardwareStore((state) => state.robotStatus);
+  const hardwareJointAngles = useHardwareStore((state) => state.hardwareJointAngles);
+  const hardwareTcpPose = useHardwareStore((state) => state.hardwareTcpPose);
 
-  const config = useConfigStore((state) => state.config);
+  // Input store: Input angle setters and target cartesian pose
+  const setInputJointAngle = useInputStore((state) => state.setInputJointAngle);
 
-  // Get all saved positions from config
-  const savedPositions = getAllPositions();
+  // Command store: TCP pose
+  const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
 
-  const handleMoveJoint = async () => {
-    setIsMoving(true);
-    try {
-      const result = await moveJoints(commandedJointAngles, speed);
-      if (!result.success) {
-        alert(`Failed to move robot (joint): ${result.error || 'Unknown error'}`);
-      }
-    } catch (error) {
-      console.error('Error moving robot (joint):', error);
-      alert('Failed to communicate with robot');
-    } finally {
-      setIsMoving(false);
-    }
-  };
+  // Kinematics store: Computation robot and tool
+  const computationRobotRef = useKinematicsStore((state) => state.computationRobotRef);
+  const computationTool = useKinematicsStore((state) => state.computationTool);
 
-  const handleMovePose = async () => {
-    if (!commandedTcpPose) {
-      alert('Target position not available yet. Please wait for robot to load.');
-      return;
-    }
-    setIsMoving(true);
-    try {
-      const result = await movePose(commandedTcpPose, speed);
-      if (!result.success) {
-        alert(`Failed to move robot (pose): ${result.error || 'Unknown error'}`);
-      }
-    } catch (error) {
-      console.error('Error moving robot (pose):', error);
-      alert('Failed to communicate with robot');
-    } finally {
-      setIsMoving(false);
-    }
-  };
+  // Robot config store: TCP offset and IK axis mask
+  const tcpOffset = useRobotConfigStore((state) => state.tcpOffset);
+  const ikAxisMask = useRobotConfigStore((state) => state.ikAxisMask);
 
-  const handleMoveCartesian = async () => {
-    if (!commandedTcpPose) {
-      alert('Target position not available yet. Please wait for robot to load.');
-      return;
-    }
-    setIsMoving(true);
-    try {
-      const result = await moveCartesian(commandedTcpPose, speed);
-      if (!result.success) {
-        alert(`Failed to move robot (cartesian): ${result.error || 'Unknown error'}`);
-      }
-    } catch (error) {
-      console.error('Error moving robot (cartesian):', error);
-      alert('Failed to communicate with robot');
-    } finally {
-      setIsMoving(false);
-    }
-  };
+  // Performance store: Recording state
+  const isRecording = usePerformanceStore((state) => state.isRecording);
+  const startRecording = usePerformanceStore((state) => state.startRecording);
+  const stopRecording = usePerformanceStore((state) => state.stopRecording);
 
   const handleHome = async () => {
     setIsHoming(true);
@@ -104,15 +64,26 @@ export default function ControlOptions() {
 
       if (!response.ok) {
         const error = await response.json();
-        console.error('Failed to home robot:', error);
+        logger.error('Failed to home robot', 'ControlOptions', error);
         alert(`Failed to home robot: ${error.detail || 'Unknown error'}`);
       }
     } catch (error) {
-      console.error('Error homing robot:', error);
+      logger.error('Error homing robot', 'ControlOptions', error);
       alert('Failed to communicate with robot');
     } finally {
       setIsHoming(false);
     }
+  };
+
+  const handleCopyPoseFromHardware = () => {
+    if (!hardwareJointAngles) return;
+
+    // Copy all 6 joint angles from hardware to commanded and input
+    const joints: JointName[] = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6'];
+    joints.forEach(joint => {
+      setInputJointAngle(joint, hardwareJointAngles[joint]);
+      setCommandedJointAngle(joint, hardwareJointAngles[joint]);
+    });
   };
 
   const handleClearEstop = async () => {
@@ -127,13 +98,13 @@ export default function ControlOptions() {
 
       if (!response.ok) {
         const error = await response.json();
-        console.error('Failed to clear E-stop:', error);
+        logger.error('Failed to clear E-stop', 'ControlOptions', error);
         alert(`Failed to clear E-stop: ${error.detail || 'Unknown error'}`);
       }
     } catch (error) {
-      console.error('Error clearing E-stop:', error);
+      logger.error('Error clearing E-stop', 'ControlOptions', error);
       alert('Failed to communicate with robot');
-    } finally {
+    } finally{
       setIsClearing(false);
     }
   };
@@ -150,7 +121,7 @@ export default function ControlOptions() {
 
       if (!response.ok) {
         const error = await response.json();
-        console.error('Failed to stop robot:', error);
+        logger.error('Failed to stop robot', 'ControlOptions', error);
         alert(`Failed to stop robot: ${error.detail || 'Unknown error'}`);
       } else {
         // Reset moving states when stop is successful
@@ -158,74 +129,125 @@ export default function ControlOptions() {
         setIsHoming(false);
       }
     } catch (error) {
-      console.error('Error stopping robot:', error);
+      logger.error('Error stopping robot', 'ControlOptions', error);
       alert('Failed to communicate with robot');
     } finally {
       setIsStopping(false);
     }
   };
 
-  const handleGoToPosition = (joints: { J1: number; J2: number; J3: number; J4: number; J5: number; J6: number }) => {
-    // Set both input and commanded positions
-    Object.entries(joints).forEach(([joint, angle]) => {
-      setInputJointAngle(joint as any, angle);
-      setCommandedJointAngle(joint as any, angle);
-    });
+
+  const handleMoveCartesianBackend = async () => {
+    setIsMovingCartesianBackend(true);
+    try {
+      // ========================================================================
+      // 100Hz Cartesian Motion System (Frontend IK)
+      // ========================================================================
+      // 1. Get current pose (from hardware store - already computed by URDF)
+      // 2. Get target pose (from command store - already computed by URDF)
+      // 3. Generate waypoints for straight-line motion
+      // 4. Solve IK for each waypoint (frontend numericalIK)
+      // 5. Execute trajectory at 100Hz
+      // ========================================================================
+
+      if (!hardwareJointAngles || !hardwareTcpPose || !commandedTcpPose) {
+        alert('Robot pose not available - wait for URDF to load');
+        return;
+      }
+
+      if (!computationRobotRef) {
+        alert('URDF robot model not loaded yet');
+        return;
+      }
+
+      logger.debug('Start pose', 'CartesianMotion', { pose: hardwareTcpPose });
+      logger.debug('Target pose', 'CartesianMotion', { pose: commandedTcpPose });
+
+      // Calculate duration based on speed percentage
+      const baseDuration = 2.0; // Base duration in seconds
+      const duration = baseDuration * (100 / speed);
+      const numWaypoints = calculateWaypointCount(duration);
+
+      logger.debug(`Generating ${numWaypoints} waypoints for ${duration.toFixed(2)}s (${speed}% speed)`, 'CartesianMotion');
+
+      // Generate Cartesian waypoints (straight-line interpolation)
+      const cartesianWaypoints = generateCartesianWaypoints(hardwareTcpPose, commandedTcpPose, { duration });
+
+      logger.debug(`Generated ${cartesianWaypoints.length} waypoints`, 'CartesianMotion');
+
+      // Solve IK for each waypoint using frontend solver
+      logger.debug('Solving IK for waypoints...', 'CartesianMotion');
+      const startTime = performance.now();
+      const jointTrajectory: number[][] = [];
+      let currentSeed = { ...hardwareJointAngles };
+
+      for (let i = 0; i < cartesianWaypoints.length; i++) {
+        const waypoint = cartesianWaypoints[i];
+
+        // Solve IK using frontend numerical solver with computation robot
+        const ikResult = inverseKinematicsDetailed(
+          waypoint,
+          currentSeed,
+          computationRobotRef,
+          computationTool,
+          ikAxisMask
+        );
+
+        if (!ikResult.success || !ikResult.jointAngles) {
+          alert(`IK failed at waypoint ${i + 1}/${cartesianWaypoints.length}: ${ikResult.error?.message || 'Unknown error'}`);
+          logger.error('IK failed at waypoint', 'CartesianMotion', { waypoint: i, result: ikResult });
+          return;
+        }
+
+        // Add to trajectory as array [J1, J2, J3, J4, J5, J6]
+        const joints = ikResult.jointAngles;
+        jointTrajectory.push([joints.J1, joints.J2, joints.J3, joints.J4, joints.J5, joints.J6]);
+
+        // Use this solution as seed for next waypoint (faster convergence)
+        currentSeed = joints;
+      }
+
+      const elapsed = performance.now() - startTime;
+      logger.debug(`IK solved for ${jointTrajectory.length} waypoints in ${elapsed.toFixed(0)}ms`, 'CartesianMotion');
+
+      // Execute trajectory at 100Hz
+      logger.debug('Executing trajectory at 100Hz...', 'CartesianMotion');
+      const execResult = await executeTrajectory({
+        trajectory: jointTrajectory,
+        duration: duration,
+        wait_for_ack: false
+      });
+
+      if (!execResult.success) {
+        alert(`Failed to execute trajectory: ${execResult.message}`);
+        logger.error('Execute failed', 'CartesianMotion', execResult);
+      } else {
+        logger.debug(`Trajectory executing (${jointTrajectory.length} waypoints)`, 'CartesianMotion');
+      }
+
+    } catch (error) {
+      logger.error('Cartesian motion error', 'CartesianMotion', error);
+      alert(`Cartesian motion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsMovingCartesianBackend(false);
+    }
+  };
+
+
+  const handleRecordingToggle = async (checked: boolean) => {
+    if (checked) {
+      await startRecording();
+    } else {
+      await stopRecording();
+    }
   };
 
   return (
-    <Card className="p-3 h-full flex flex-col">
-      <h2 className="text-sm font-semibold mb-3">Options</h2>
-
-      <div className="space-y-3 flex-1">
-        {/* Speed Control */}
-        <div>
-          <label className="text-xs font-medium mb-1.5 block">
-            Speed: {speed}%
-          </label>
-          <Slider
-            value={[speed]}
-            onValueChange={(value) => setSpeed(value[0])}
-            min={0}
-            max={100}
-            step={1}
-            className="w-full"
-          />
-        </div>
-
-        {/* Acceleration Control */}
-        <div>
-          <label className="text-xs font-medium mb-1.5 block">
-            Accel: {accel}%
-          </label>
-          <Slider
-            value={[accel]}
-            onValueChange={(value) => setAccel(value[0])}
-            min={0}
-            max={100}
-            step={1}
-            className="w-full"
-          />
-        </div>
-
-        {/* Step Angle Control */}
-        <div>
-          <label className="text-xs font-medium mb-1.5 block">
-            Step: {stepAngle.toFixed(2)}°
-          </label>
-          <Slider
-            value={[stepAngle]}
-            onValueChange={(value) => setStepAngle(value[0])}
-            min={0.01}
-            max={10}
-            step={0.01}
-            className="w-full"
-          />
-        </div>
-      </div>
+    <Card className="p-3">
+      <h2 className="text-sm font-semibold mb-3">Actions</h2>
 
       {/* Action Buttons */}
-      <div className="space-y-1.5 mt-3 pt-3 border-t">
+      <div className="space-y-1.5">
         {/* E-Stop Clear Button - Show prominently when E-stop is active */}
         {robotStatus?.estop_active && (
           <Button
@@ -241,7 +263,7 @@ export default function ControlOptions() {
         )}
 
         {/* Stop Button - Show prominently when robot is moving */}
-        {(isMoving || isHoming) && (
+        {isMoving && !isHoming && (
           <Button
             variant="destructive"
             size="sm"
@@ -255,65 +277,60 @@ export default function ControlOptions() {
         )}
 
         <Button
-          variant="default"
-          size="sm"
-          className="h-8 text-xs w-full font-semibold"
-          onClick={handleMoveJoint}
-          disabled={isMoving || isHoming}
-        >
-          <Move className="h-3.5 w-3.5 mr-1.5" />
-          {isMoving ? 'Moving...' : 'Move to Target (Joint)'}
-        </Button>
-        <Button
-          variant="default"
-          size="sm"
-          className="h-8 text-xs w-full font-semibold"
-          onClick={handleMovePose}
-          disabled={isMoving || isHoming}
-        >
-          <Move className="h-3.5 w-3.5 mr-1.5" />
-          {isMoving ? 'Moving...' : 'Move to Target (Pose)'}
-        </Button>
-        <Button
-          variant="default"
-          size="sm"
-          className="h-8 text-xs w-full font-semibold"
-          onClick={handleMoveCartesian}
-          disabled={isMoving || isHoming}
-        >
-          <Move className="h-3.5 w-3.5 mr-1.5" />
-          {isMoving ? 'Moving...' : 'Move to Target (Cartesian)'}
-        </Button>
-        <Button
           variant="outline"
           size="sm"
           className="h-8 text-xs w-full"
           onClick={handleHome}
-          disabled={isHoming || isMoving}
+          disabled={isHoming || isMoving || hardwareJointAngles === null}
         >
-          {isHoming ? 'Homing...' : 'Home Position'}
+          {isHoming ? 'Homing...' : 'Home hardware robot'}
         </Button>
 
-        {/* Preset Position Buttons - Dynamic from config.yaml */}
-        {savedPositions.length > 0 && (
-          <div className="pt-2 border-t">
-            <label className="text-xs font-medium mb-1.5 block">Target Presets</label>
-            <div className="flex gap-1.5 flex-wrap">
-              {savedPositions.map((position) => (
-                <Button
-                  key={position.name}
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs flex-1 min-w-[70px]"
-                  onClick={() => handleGoToPosition(position.joints)}
-                  disabled={isMoving || isHoming}
-                >
-                  {position.name}
-                </Button>
-              ))}
-            </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={handleCopyPoseFromHardware}
+                disabled={hardwareJointAngles === null}
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs w-full"
+              >
+                <Copy className="h-3.5 w-3.5 mr-1.5" />
+                Copy Pose
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Copy hardware robot position to commanded robot</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs w-full"
+          onClick={handleMoveCartesianBackend}
+          disabled={isMovingCartesianBackend || isMoving || hardwareJointAngles === null}
+        >
+          <Target className="h-3.5 w-3.5 mr-1.5" />
+          {isMovingCartesianBackend ? 'Moving...' : 'Execute Cartesian Motion'}
+        </Button>
+
+        {/* Performance Recording Toggle */}
+        <div className="flex items-center justify-between pt-2 border-t">
+          <div className="flex items-center gap-2">
+            <Circle className={`h-3 w-3 ${isRecording ? 'fill-red-500 text-red-500 animate-pulse' : 'text-gray-400'}`} />
+            <Label htmlFor="recording-toggle" className="text-xs font-medium cursor-pointer">
+              {isRecording ? 'Recording...' : 'Record Performance'}
+            </Label>
           </div>
-        )}
+          <Switch
+            id="recording-toggle"
+            checked={isRecording}
+            onCheckedChange={handleRecordingToggle}
+          />
+        </div>
       </div>
     </Card>
   );

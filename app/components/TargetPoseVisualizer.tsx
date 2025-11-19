@@ -70,9 +70,19 @@ export default function TargetPoseVisualizer() {
     groupRef.current.add(zArrowRef.current);
 
     return () => {
-      if (xArrowRef.current) groupRef.current?.remove(xArrowRef.current);
-      if (yArrowRef.current) groupRef.current?.remove(yArrowRef.current);
-      if (zArrowRef.current) groupRef.current?.remove(zArrowRef.current);
+      // Properly dispose of ArrowHelpers to prevent memory leaks
+      if (xArrowRef.current) {
+        groupRef.current?.remove(xArrowRef.current);
+        xArrowRef.current.dispose();
+      }
+      if (yArrowRef.current) {
+        groupRef.current?.remove(yArrowRef.current);
+        yArrowRef.current.dispose();
+      }
+      if (zArrowRef.current) {
+        groupRef.current?.remove(zArrowRef.current);
+        zArrowRef.current.dispose();
+      }
     };
   }, []);
 
@@ -91,11 +101,13 @@ export default function TargetPoseVisualizer() {
     );
 
     // Update rotation from input orientation (convert degrees to radians)
-    // TODO: May need rotation transformation in robotToThreeJs
+    // Transform robot coordinate rotations to Three.js coordinate rotations
+    // Robot Z-up → Three.js Y-up requires: RX stays, RY→-RZ, RZ→RY
+    groupRef.current.rotation.order = 'ZXY';
     groupRef.current.rotation.set(
-      (threeJsPose.RX * Math.PI) / 180,
-      (threeJsPose.RY * Math.PI) / 180,
-      (threeJsPose.RZ * Math.PI) / 180
+      (inputCartesianPose.RX * Math.PI) / 180,   // RX stays same
+      (inputCartesianPose.RZ * Math.PI) / 180,   // Robot RZ → Three.js RY
+      (-inputCartesianPose.RY * Math.PI) / 180   // Robot RY → Three.js -RZ (negated!)
     );
   });
 

@@ -33,16 +33,16 @@ export interface TCPPoseDisplayProps {
 export function TCPPoseDisplay({ pose, label, colors, className = '' }: TCPPoseDisplayProps) {
   if (!pose) {
     return (
-      <div className={`grid grid-cols-7 gap-2 ${className}`}>
-        <div className="text-gray-400">{label}:</div>
+      <div className={`grid grid-cols-7 gap-1 ${className}`}>
+        <div className="text-gray-400">{label}:  </div>
         <div className="text-center text-gray-500 col-span-6">N/A</div>
       </div>
     );
   }
 
   return (
-    <div className={`grid grid-cols-7 gap-2 ${className}`}>
-      <div className="text-gray-400">{label}:</div>
+    <div className={`grid grid-cols-7 gap-1 ${className}`}>
+      <div className="text-gray-400">{label}:  </div>
       <div className="text-center" style={{ color: colors.x }}>
         {pose.X.toFixed(1)}
       </div>
@@ -70,7 +70,7 @@ export function TCPPoseDisplay({ pose, label, colors, className = '' }: TCPPoseD
  */
 export function TCPPoseHeader({ className = '' }: { className?: string }) {
   return (
-    <div className={`grid grid-cols-7 gap-2 text-xs font-semibold mb-1 ${className}`}>
+    <div className={`grid grid-cols-7 gap-1 text-xs font-semibold mb-1 ${className}`}>
       <div></div>
       <div className="text-center">X</div>
       <div className="text-center">Y</div>

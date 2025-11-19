@@ -5,7 +5,8 @@
  */
 
 import { create } from 'zustand';
-import type { JointAngles, CartesianPose, IOStatus, GripperStatus, RobotStatus, ConnectionStatus } from '../types';
+import type { JointAngles, CartesianPose, IOStatus, GripperStatus, RobotStatus, ConnectionStatus, Tool } from '../types';
+import { getDefaultTool } from '../toolManager';
 
 export interface HardwareStore {
   // Real joint angles from physical robot encoders
@@ -21,6 +22,9 @@ export interface HardwareStore {
   // URDF reference for hardware robot visual (ghost robot)
   hardwareRobotRef: any;
 
+  // Tool actually mounted on hardware (reported by hardware or manually set)
+  hardwareTool: Tool;
+
   // Hardware status from WebSocket
   ioStatus: IOStatus | null;
   gripperStatus: GripperStatus | null;
@@ -32,6 +36,7 @@ export interface HardwareStore {
   setHardwareCartesianPose: (pose: CartesianPose | null) => void;
   setHardwareTcpPose: (pose: CartesianPose | null) => void;
   setHardwareRobotRef: (ref: any) => void;
+  setHardwareTool: (tool: Tool) => void;
   setIOStatus: (status: IOStatus | null) => void;
   setGripperStatus: (status: GripperStatus | null) => void;
   setRobotStatus: (status: RobotStatus | null) => void;
@@ -44,6 +49,7 @@ export const useHardwareStore = create<HardwareStore>((set) => ({
   hardwareCartesianPose: null,
   hardwareTcpPose: null,
   hardwareRobotRef: null,
+  hardwareTool: getDefaultTool([]), // Will be updated when hardware reports tool
 
   ioStatus: null,
   gripperStatus: null,
@@ -55,6 +61,7 @@ export const useHardwareStore = create<HardwareStore>((set) => ({
   setHardwareCartesianPose: (pose) => set({ hardwareCartesianPose: pose }),
   setHardwareTcpPose: (pose) => set({ hardwareTcpPose: pose }),
   setHardwareRobotRef: (ref) => set({ hardwareRobotRef: ref }),
+  setHardwareTool: (tool) => set({ hardwareTool: tool }),
   setIOStatus: (status) => set({ ioStatus: status }),
   setGripperStatus: (status) => set({ gripperStatus: status }),
   setRobotStatus: (status) => set({ robotStatus: status }),

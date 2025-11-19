@@ -18,7 +18,8 @@ export const JOINT_LIMITS: Record<string, JointLimit> = {
 
 // Joint angle offsets for URDF visualization (degrees)
 // These offsets correct the visual model to match the real robot's coordinate system
-export const JOINT_ANGLE_OFFSETS = [0, 90, 180, -90, 0, 180];
+// COMMENTED OUT FOR NEW URDF TEST - may need different values
+export const JOINT_ANGLE_OFFSETS = [0, 0, 0, 0, 0, 0];  // Was: [0, 90, 180, -90, 0, 90]
 //                                 J1  J2  J3   J4  J5  J6
 
 // Timeline colors (one per joint track)
@@ -33,8 +34,8 @@ export const JOINT_COLORS = [
 
 // Cartesian limits (approximate workspace)
 export const CARTESIAN_LIMITS = {
-  X: { min: -300, max: 300 },    // mm
-  Y: { min: -300, max: 300 },    // mm
+  X: { min: -500, max: 500 },    // mm
+  Y: { min: -500, max: 500 },    // mm
   Z: { min: 0, max: 500 },       // mm (above base)
   RX: { min: -180, max: 180 },   // degrees
   RY: { min: -180, max: 180 },   // degrees
@@ -46,12 +47,13 @@ export const DEFAULT_FPS = 60;
 export const DEFAULT_DURATION = 10; // seconds
 
 // Orientation extraction configuration (found through iterative testing)
-// These values produce correct orientation from URDF model for PAROL6
+// These values align URDF orientation with backend DH model orientation
+// RESET FOR NEW URDF TEST - old values: offset RZ:90, eulerOrder:'ZXY', negateRX:true, negateRY:true
 export const ORIENTATION_CONFIG = {
-  offset: { RX: 0, RY: 90, RZ: -180 },  // Orientation offset in degrees
-  eulerOrder: 'ZXY' as const,  // Three.js Euler angle extraction order
-  applyQuaternionTransform: true,  // Apply parent rotation inverse transform
-  negateRX: true,   // RX needs sign flip
-  negateRY: true,   // RY needs sign flip
-  negateRZ: false   // RZ is correct as-is
+  offset: { RX: 0, RY: 0, RZ: 0 },  // No offset (was: RZ: 90)
+  eulerOrder: 'XYZ' as const,  // Standard Euler order (was: 'ZXY')
+  applyQuaternionTransform: false,  // No transform (was: true)
+  negateRX: false,   // No negation (was: true)
+  negateRY: false,   // No negation (was: true)
+  negateRZ: false   // No negation (was: false)
 } as const;

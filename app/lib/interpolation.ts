@@ -1,5 +1,5 @@
-import { Keyframe, JointAngles, JointName, CartesianKeyframe, CartesianPose, CartesianAxis } from './types';
-import { JOINT_NAMES, CARTESIAN_AXES } from './constants';
+import { Keyframe, JointAngles, JointName, CartesianPose } from './types';
+import { JOINT_NAMES } from './constants';
 import { getHomePosition } from './positions';
 
 /**
@@ -10,41 +10,40 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 /**
- * Get interpolated value for a single joint at a specific time
+ * Get interpolated joint angles at a specific time
+ * Single keyframe model: each keyframe contains all 6 joint angles
+ * All joints interpolate together as a coordinated pose
  */
-function getJointValueAtTime(
+export function getJointAnglesAtTime(
   keyframes: Keyframe[],
-  joint: JointName,
   time: number
-): number {
-  // Filter keyframes for this specific joint
-  const jointKeyframes = keyframes
-    .filter(kf => kf.joint === joint)
-    .sort((a, b) => a.time - b.time);
+): JointAngles {
+  // Sort keyframes by time
+  const sortedKeyframes = keyframes.slice().sort((a, b) => a.time - b.time);
 
-  // If no keyframes for this joint, return home position
-  if (jointKeyframes.length === 0) {
-    return getHomePosition()[joint];
+  // If no keyframes, return home position
+  if (sortedKeyframes.length === 0) {
+    return getHomePosition();
   }
 
-  // If before first keyframe, return first keyframe value
-  if (time <= jointKeyframes[0].time) {
-    return jointKeyframes[0].value;
+  // If before first keyframe, return first keyframe's joint angles
+  if (time <= sortedKeyframes[0].time) {
+    return sortedKeyframes[0].jointAngles;
   }
 
-  // If after last keyframe, return last keyframe value
-  if (time >= jointKeyframes[jointKeyframes.length - 1].time) {
-    return jointKeyframes[jointKeyframes.length - 1].value;
+  // If after last keyframe, return last keyframe's joint angles
+  if (time >= sortedKeyframes[sortedKeyframes.length - 1].time) {
+    return sortedKeyframes[sortedKeyframes.length - 1].jointAngles;
   }
 
   // Find surrounding keyframes
-  let before = jointKeyframes[0];
-  let after = jointKeyframes[1];
+  let before = sortedKeyframes[0];
+  let after = sortedKeyframes[1];
 
-  for (let i = 0; i < jointKeyframes.length - 1; i++) {
-    if (time >= jointKeyframes[i].time && time <= jointKeyframes[i + 1].time) {
-      before = jointKeyframes[i];
-      after = jointKeyframes[i + 1];
+  for (let i = 0; i < sortedKeyframes.length - 1; i++) {
+    if (time >= sortedKeyframes[i].time && time <= sortedKeyframes[i + 1].time) {
+      before = sortedKeyframes[i];
+      after = sortedKeyframes[i + 1];
       break;
     }
   }
@@ -54,23 +53,10 @@ function getJointValueAtTime(
   const elapsed = time - before.time;
   const t = duration > 0 ? elapsed / duration : 0;
 
-  // Interpolate between the two keyframe values
-  return lerp(before.value, after.value, t);
-}
-
-/**
- * Get interpolated joint angles at a specific time
- * Each joint is interpolated independently based on its own keyframes
- */
-export function getJointAnglesAtTime(
-  keyframes: Keyframe[],
-  time: number
-): JointAngles {
+  // Interpolate all joints together
   const result: JointAngles = {} as JointAngles;
-
-  // Interpolate each joint independently
   JOINT_NAMES.forEach((joint) => {
-    result[joint] = getJointValueAtTime(keyframes, joint, time);
+    result[joint] = lerp(before.jointAngles[joint], after.jointAngles[joint], t);
   });
 
   return result;
@@ -78,68 +64,69 @@ export function getJointAnglesAtTime(
 
 /**
  * Calculate total path length (sum of angular distances)
- * For keyframe model, this calculates per-joint motion
+ * Single keyframe model: sum all joint angle changes between consecutive keyframes
  */
 export function calculatePathLength(keyframes: Keyframe[]): number {
   if (keyframes.length < 2) return 0;
 
+  const sortedKeyframes = keyframes.slice().sort((a, b) => a.time - b.time);
   let totalDistance = 0;
 
-  // Calculate distance for each joint independently
-  JOINT_NAMES.forEach((joint) => {
-    const jointKeyframes = keyframes
-      .filter(kf => kf.joint === joint)
-      .sort((a, b) => a.time - b.time);
+  // Calculate distance between consecutive keyframes
+  for (let i = 0; i < sortedKeyframes.length - 1; i++) {
+    const kf1 = sortedKeyframes[i];
+    const kf2 = sortedKeyframes[i + 1];
 
-    for (let i = 0; i < jointKeyframes.length - 1; i++) {
-      const kf1 = jointKeyframes[i];
-      const kf2 = jointKeyframes[i + 1];
-      totalDistance += Math.abs(kf2.value - kf1.value);
-    }
-  });
+    // Sum angular changes across all joints
+    JOINT_NAMES.forEach((joint) => {
+      totalDistance += Math.abs(kf2.jointAngles[joint] - kf1.jointAngles[joint]);
+    });
+  }
 
   return totalDistance;
 }
 
 /**
- * Get interpolated value for a single cartesian axis at a specific time
+ * Get interpolated cartesian pose at a specific time using keyframe cartesianPose data
+ * Used when interpolating between keyframes where the NEXT keyframe has motionType === 'cartesian'
  */
-function getCartesianValueAtTime(
-  keyframes: CartesianKeyframe[],
-  axis: CartesianAxis,
-  time: number,
-  defaultValue: number
-): number {
-  // Filter keyframes for this specific axis
-  const axisKeyframes = keyframes
-    .filter(kf => kf.axis === axis)
-    .sort((a, b) => a.time - b.time);
+export function getCartesianPoseAtTime(
+  keyframes: Keyframe[],
+  time: number
+): CartesianPose | null {
+  // Sort keyframes by time
+  const sortedKeyframes = keyframes.slice().sort((a, b) => a.time - b.time);
 
-  // If no keyframes for this axis, return default value
-  if (axisKeyframes.length === 0) {
-    return defaultValue;
+  // If no keyframes, return null
+  if (sortedKeyframes.length === 0) {
+    return null;
   }
 
-  // If before first keyframe, return first keyframe value
-  if (time <= axisKeyframes[0].time) {
-    return axisKeyframes[0].value;
+  // If before first keyframe, return null (no cartesian data yet)
+  if (time <= sortedKeyframes[0].time) {
+    return sortedKeyframes[0].cartesianPose || null;
   }
 
-  // If after last keyframe, return last keyframe value
-  if (time >= axisKeyframes[axisKeyframes.length - 1].time) {
-    return axisKeyframes[axisKeyframes.length - 1].value;
+  // If after last keyframe, return last keyframe's cartesian pose
+  if (time >= sortedKeyframes[sortedKeyframes.length - 1].time) {
+    return sortedKeyframes[sortedKeyframes.length - 1].cartesianPose || null;
   }
 
   // Find surrounding keyframes
-  let before = axisKeyframes[0];
-  let after = axisKeyframes[1];
+  let before = sortedKeyframes[0];
+  let after = sortedKeyframes[1];
 
-  for (let i = 0; i < axisKeyframes.length - 1; i++) {
-    if (time >= axisKeyframes[i].time && time <= axisKeyframes[i + 1].time) {
-      before = axisKeyframes[i];
-      after = axisKeyframes[i + 1];
+  for (let i = 0; i < sortedKeyframes.length - 1; i++) {
+    if (time >= sortedKeyframes[i].time && time <= sortedKeyframes[i + 1].time) {
+      before = sortedKeyframes[i];
+      after = sortedKeyframes[i + 1];
       break;
     }
+  }
+
+  // If either keyframe doesn't have cartesian pose, return null
+  if (!before.cartesianPose || !after.cartesianPose) {
+    return null;
   }
 
   // Calculate interpolation factor (0 to 1)
@@ -147,34 +134,37 @@ function getCartesianValueAtTime(
   const elapsed = time - before.time;
   const t = duration > 0 ? elapsed / duration : 0;
 
-  // Interpolate between the two keyframe values
-  return lerp(before.value, after.value, t);
+  // Interpolate all cartesian values together
+  return {
+    X: lerp(before.cartesianPose.X, after.cartesianPose.X, t),
+    Y: lerp(before.cartesianPose.Y, after.cartesianPose.Y, t),
+    Z: lerp(before.cartesianPose.Z, after.cartesianPose.Z, t),
+    RX: lerp(before.cartesianPose.RX, after.cartesianPose.RX, t),
+    RY: lerp(before.cartesianPose.RY, after.cartesianPose.RY, t),
+    RZ: lerp(before.cartesianPose.RZ, after.cartesianPose.RZ, t)
+  };
 }
 
 /**
- * Get interpolated cartesian pose at a specific time
- * Each axis is interpolated independently based on its own keyframes
+ * Determine if we should use cartesian interpolation at the given time
+ * Returns true if we're interpolating TO a cartesian keyframe
  */
-export function getCartesianPoseAtTime(
-  keyframes: CartesianKeyframe[],
+export function shouldUseCartesianInterpolation(
+  keyframes: Keyframe[],
   time: number
-): CartesianPose {
-  const result: CartesianPose = {
-    X: 0,
-    Y: 0,
-    Z: 300, // Default height
-    RX: 0,
-    RY: 0,
-    RZ: 0
-  };
+): boolean {
+  // Sort keyframes by time
+  const sortedKeyframes = keyframes.slice().sort((a, b) => a.time - b.time);
 
-  // Default values for each axis
-  const defaults = { X: 0, Y: 0, Z: 300, RX: 0, RY: 0, RZ: 0 };
+  // Find the next keyframe (the one we're moving TO)
+  for (let i = 0; i < sortedKeyframes.length - 1; i++) {
+    if (time >= sortedKeyframes[i].time && time <= sortedKeyframes[i + 1].time) {
+      // We're between keyframes[i] and keyframes[i+1]
+      // Check if the NEXT keyframe (i+1) is cartesian
+      return sortedKeyframes[i + 1].motionType === 'cartesian';
+    }
+  }
 
-  // Interpolate each axis independently
-  CARTESIAN_AXES.forEach((axis) => {
-    result[axis] = getCartesianValueAtTime(keyframes, axis, time, defaults[axis]);
-  });
-
-  return result;
+  // Not between keyframes, use joint by default
+  return false;
 }

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { getApiBaseUrl } from './apiConfig';
+import { logger } from './logger';
 
 // Config types matching config.yaml structure
 interface RobotConfig {
@@ -36,6 +37,9 @@ interface TCPOffset {
   x: number;
   y: number;
   z: number;
+  rx: number;  // Orientation offset around X-axis (degrees)
+  ry: number;  // Orientation offset around Y-axis (degrees)
+  rz: number;  // Orientation offset around Z-axis (degrees)
 }
 
 interface RobotAppearance {
@@ -134,6 +138,9 @@ const defaultConfig: Config = {
       x: 47,
       y: 0,
       z: -62,
+      rx: 0,
+      ry: 0,
+      rz: 0,
     },
     hardware_robot: {
       color: '#808080',
@@ -177,7 +184,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
       const config = await response.json();
       set({ config, isLoading: false });
     } catch (error) {
-      console.error('Error fetching config:', error);
+      logger.error('Error fetching config', 'ConfigStore', error);
       set({
         error: error instanceof Error ? error.message : 'Unknown error',
         isLoading: false,
@@ -208,7 +215,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
       };
       set({ config: mergedConfig, isLoading: false });
     } catch (error) {
-      console.error('Error saving config:', error);
+      logger.error('Error saving config', 'ConfigStore', error);
       set({
         error: error instanceof Error ? error.message : 'Unknown error',
         isLoading: false,

@@ -1,14 +1,12 @@
 'use client';
 
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
 import { useRobotWebSocket, LogEntry } from '../hooks/useRobotWebSocket';
 
 export default function CommandLog() {
   // Connect to WebSocket and subscribe to logs (INFO and above only)
-  const { logs, clearLogs, isConnected } = useRobotWebSocket(undefined, {
+  const { logs, isConnected } = useRobotWebSocket(undefined, {
     topics: ['logs'],
     logLevel: 'INFO', // Filter out DEBUG logs
   });
@@ -21,10 +19,6 @@ export default function CommandLog() {
       logContainerRef.current.scrollTop = 0;
     }
   }, [logs]);
-
-  const handleClearLog = () => {
-    clearLogs();
-  };
 
   const getLevelColor = (level: LogEntry['level']): string => {
     switch (level) {
@@ -52,19 +46,6 @@ export default function CommandLog() {
 
   return (
     <Card className="p-3 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-semibold">Command Log</h2>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleClearLog}
-          className="h-6 text-xs"
-        >
-          <X className="h-3 w-3 mr-1" />
-          Clear
-        </Button>
-      </div>
-
       <div
         ref={logContainerRef}
         className="flex-1 overflow-y-auto space-y-0.5 font-mono text-xs bg-secondary/20 rounded-md p-2"

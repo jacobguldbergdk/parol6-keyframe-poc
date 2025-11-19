@@ -35,9 +35,11 @@ export default function RobotStatusPanel() {
               <span className={connectionStatus === 'connected' ? 'text-green-500' : 'text-gray-500'}>
                 ●
               </span>
-              <span className="text-muted-foreground">WebSocket:</span>
+              <span className="text-muted-foreground">Commander:</span>
               <span className="font-medium">
-                {connectionStatus.toUpperCase()}
+                {connectionStatus === 'connected' ?
+                  `CONNECTED - ${robotStatus?.commander_hz?.toFixed(0) ?? '--'}Hz` :
+                  connectionStatus.toUpperCase()}
               </span>
             </div>
             <div className="flex items-center gap-2">

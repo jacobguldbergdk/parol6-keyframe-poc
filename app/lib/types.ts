@@ -68,36 +68,32 @@ export interface RobotStatus {
   is_stopped: boolean | null;
   estop_active: boolean | null;
   homed: boolean[] | null;  // Homing status for all 6 joints [J1, J2, J3, J4, J5, J6]
+  commander_hz: number | null;  // Commander control loop frequency in Hz
   timestamp: string;
 }
 
 // WebSocket connection status
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
-// Joint keyframe = one joint value at one time (independent per joint)
+// Keyframe = single pose snapshot at a specific time
+// Stores all 6 joint angles together (robot commands are coordinated, not per-joint)
 export interface Keyframe {
   id: string;
   time: number; // seconds
-  joint: JointName; // Which joint this keyframe controls
-  value: number; // degrees
+  jointAngles: JointAngles; // All 6 joint angles (absolute truth - always stored)
+  motionType?: 'joint' | 'cartesian'; // How to interpolate to next keyframe (default: 'joint')
+  cartesianPose?: CartesianPose; // FK-computed cartesian pose (for reference/editing)
   label?: string;
+  toolId?: string; // Tool active at this keyframe
+  gripperState?: 'open' | 'closed'; // Gripper state at this keyframe (if tool has gripper)
 }
 
-// Cartesian keyframe = one cartesian axis value at one time
-export interface CartesianKeyframe {
-  id: string;
-  time: number; // seconds
-  axis: CartesianAxis; // Which axis this keyframe controls
-  value: number; // mm for X,Y,Z; degrees for RX,RY,RZ
-  label?: string;
-}
-
-// Timeline = collection of keyframes (joint or cartesian depending on mode)
+// Timeline = collection of keyframes (robot poses over time)
+// Each keyframe represents one coordinated robot pose
 export interface Timeline {
   name: string;
-  mode: MotionMode; // joint or cartesian
-  keyframes: Keyframe[]; // For joint mode
-  cartesianKeyframes: CartesianKeyframe[]; // For cartesian mode
+  mode: MotionMode; // joint or cartesian (display preference only)
+  keyframes: Keyframe[]; // Array of pose keyframes
   duration: number; // total duration in seconds
   fps?: number; // playback frame rate (default 60)
 }
@@ -109,12 +105,45 @@ export interface PlaybackState {
   startTime: number | null;
   loop: boolean;
   executeOnRobot: boolean;  // Whether to send commands to actual robot during playback
+  playbackError: string | null;  // Error message if playback fails (e.g., IK failure during cartesian interpolation)
 }
 
 // Joint limits (from PAROL6_ROBOT.py)
 export interface JointLimit {
   min: number;
   max: number;
+}
+
+// Tool configuration (from config.yaml)
+export interface Tool {
+  id: string;
+  name: string;
+  description: string;
+  mesh_file: string | null;
+  mesh_units?: 'mm' | 'm';
+  mesh_offset: {
+    x: number;
+    y: number;
+    z: number;
+    rx: number;
+    ry: number;
+    rz: number;
+  };
+  tcp_offset: {
+    x: number;
+    y: number;
+    z: number;
+    rx: number;
+    ry: number;
+    rz: number;
+  };
+  gripper_config?: {
+    enabled: boolean;
+    io_pin: number;
+    open_is_high: boolean;
+    mesh_file_open: string | null;
+    mesh_file_closed: string | null;
+  };
 }
 
 // Store state

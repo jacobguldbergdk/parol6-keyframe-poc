@@ -43,9 +43,9 @@ export function robotToThreeJs(robotPose: CartesianPose): CartesianPose {
     X: robotPose.X,         // X stays the same
     Y: robotPose.Z,         // Robot Z → Display Y (up becomes up)
     Z: -robotPose.Y,        // Robot Y → Display -Z (left becomes backward)
-    RX: robotPose.RX,       // TODO: May need rotation transformation
-    RY: robotPose.RY,
-    RZ: robotPose.RZ
+    RX: robotPose.RX,       // Rotation around X-axis stays same
+    RY: robotPose.RY,       // Rotation around Y-axis stays same
+    RZ: robotPose.RZ        // Rotation around Z-axis stays same
   };
 }
 
@@ -70,9 +70,9 @@ export function threeJsToRobot(displayPose: CartesianPose): CartesianPose {
     X: displayPose.X,       // X stays the same
     Y: -displayPose.Z,      // Display Z → Robot -Y (backward becomes left)
     Z: displayPose.Y,       // Display Y → Robot Z (up becomes up)
-    RX: displayPose.RX,     // TODO: May need rotation transformation
-    RY: displayPose.RY,
-    RZ: displayPose.RZ
+    RX: displayPose.RX,     // Rotation around X-axis stays same
+    RY: displayPose.RY,     // Rotation around Y-axis stays same
+    RZ: displayPose.RZ      // Rotation around Z-axis stays same
   };
 }
 

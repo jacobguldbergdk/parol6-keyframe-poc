@@ -26,6 +26,9 @@ export default function ActualTCPVisualizer() {
   // Reusable objects to prevent memory leaks (don't create new objects every frame!)
   const l6WorldPosition = useRef(new THREE.Vector3());
   const l6WorldQuaternion = useRef(new THREE.Quaternion());
+  const tcpRotationQuat = useRef(new THREE.Quaternion());
+  const tcpRotationEuler = useRef(new THREE.Euler());
+  const postRotationQuat = useRef(new THREE.Quaternion());
   const localOffset = useRef(new THREE.Vector3());
   const worldOffset = useRef(new THREE.Vector3());
   const tcpWorldPosition = useRef(new THREE.Vector3());
@@ -45,10 +48,11 @@ export default function ActualTCPVisualizer() {
 
     // Yellow/Lime/Purple color scheme for ACTUAL (actual robot / hardware feedback)
     // Different from target (orange/cyan/magenta) and cartesian input (red/green/blue)
+    // Standard orientation - TCP rotation quaternion handles all transformations
 
-    // X axis - Yellow (swapped: now points in negative Z direction)
+    // X axis - Yellow (standard +X direction)
     xArrowRef.current = new THREE.ArrowHelper(
-      new THREE.Vector3(0, 0, -1),  // X arrow points in negative Z direction
+      new THREE.Vector3(1, 0, 0),  // Standard X direction
       new THREE.Vector3(0, 0, 0),
       arrowLength,
       0xffff00, // Yellow
@@ -56,9 +60,9 @@ export default function ActualTCPVisualizer() {
       arrowHeadWidth
     );
 
-    // Y axis - Lime (labeled Y, flipped direction)
+    // Y axis - Lime (standard +Y direction)
     yArrowRef.current = new THREE.ArrowHelper(
-      new THREE.Vector3(0, -1, 0),  // Flipped: negated Y direction
+      new THREE.Vector3(0, 1, 0),  // Standard Y direction
       new THREE.Vector3(0, 0, 0),
       arrowLength,
       0x88ff00, // Lime
@@ -66,9 +70,9 @@ export default function ActualTCPVisualizer() {
       arrowHeadWidth
     );
 
-    // Z axis - Purple (swapped: now points in negative X direction)
+    // Z axis - Purple (standard +Z direction)
     zArrowRef.current = new THREE.ArrowHelper(
-      new THREE.Vector3(-1, 0, 0),  // Z arrow points in negative X direction
+      new THREE.Vector3(0, 0, 1),  // Standard Z direction
       new THREE.Vector3(0, 0, 0),
       arrowLength,
       0xaa00ff, // Purple
@@ -134,7 +138,27 @@ export default function ActualTCPVisualizer() {
       tcpWorldPosition.current.copy(l6WorldPosition.current).add(worldOffset.current);
 
       groupRef.current.position.copy(tcpWorldPosition.current);
+
+      // Apply TCP orientation offset to gizmo
+      // Start with L6 orientation
       groupRef.current.quaternion.copy(l6WorldQuaternion.current);
+
+      // Apply user-configurable TCP rotation
+      if (tcpOffset.rx !== 0 || tcpOffset.ry !== 0 || tcpOffset.rz !== 0) {
+        tcpRotationEuler.current.set(
+          tcpOffset.rx * Math.PI / 180,
+          tcpOffset.ry * Math.PI / 180,
+          tcpOffset.rz * Math.PI / 180,
+          'XYZ'
+        );
+        tcpRotationQuat.current.setFromEuler(tcpRotationEuler.current);
+        groupRef.current.quaternion.multiply(tcpRotationQuat.current);
+      }
+
+      // Apply fixed post-rotation: -90° around Z axis
+      // This aligns the standard arrows with the display coordinate system
+      postRotationQuat.current.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2);
+      groupRef.current.quaternion.multiply(postRotationQuat.current);
     }
 
     // Store robot coordinates (Z-up) in store - only update if position changed

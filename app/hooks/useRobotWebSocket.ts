@@ -5,6 +5,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { getWsUrl } from '../lib/apiConfig';
+import { logger } from '../lib/logger';
 
 // Log entry interface matching backend
 export interface LogEntry {
@@ -140,10 +141,14 @@ export function useRobotWebSocket(
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('[WebSocket] Connected to PAROL6 Robot API');
+        logger.debug('Connected to PAROL6 Robot API', 'WebSocket');
         setConnectionState('connected');
         setError(null);
         reconnectAttemptsRef.current = 0;
+
+        // Initialize logger with WebSocket connection
+        logger.setWebSocket(ws);
+        logger.setConnected(true);
 
         // Send initial subscription if provided
         const opts = optionsRef.current;
@@ -169,9 +174,13 @@ export function useRobotWebSocket(
               break;
 
             case 'log':
-              // Add log entry
+              // Add log entry with sliding window (max 1000 logs to prevent memory leak)
               if (message.data) {
-                setLogs(prev => [...prev, message.data as LogEntry]);
+                setLogs(prev => {
+                  const newLogs = [...prev, message.data as LogEntry];
+                  // Keep only last 1000 logs to prevent unbounded growth
+                  return newLogs.length > 1000 ? newLogs.slice(-1000) : newLogs;
+                });
               }
               break;
 
@@ -204,20 +213,25 @@ export function useRobotWebSocket(
               break;
           }
         } catch (err) {
-          console.error('[WebSocket] Message parsing error:', err);
+          logger.error('Message parsing error', 'WebSocket', err);
         }
       };
 
       ws.onerror = (event) => {
-        console.error('[WebSocket] Error:', event);
+        logger.error('WebSocket error', 'WebSocket', event);
         setError('WebSocket connection error');
         setConnectionState('error');
+        logger.setConnected(false);
       };
 
       ws.onclose = (event) => {
-        console.log('[WebSocket] Disconnected', event.code, event.reason);
+        logger.debug(`Disconnected: ${event.code} - ${event.reason}`, 'WebSocket');
         setConnectionState('disconnected');
         wsRef.current = null;
+
+        // Disconnect logger
+        logger.setWebSocket(null);
+        logger.setConnected(false);
 
         // Auto-reconnect if enabled
         if (autoReconnect && reconnectAttemptsRef.current < maxReconnectAttempts) {
@@ -226,7 +240,7 @@ export function useRobotWebSocket(
             30000 // Max 30 seconds
           );
 
-          console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1}/${maxReconnectAttempts})`);
+          logger.debug(`Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1}/${maxReconnectAttempts})`, 'WebSocket');
 
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttemptsRef.current += 1;
@@ -237,7 +251,7 @@ export function useRobotWebSocket(
         }
       };
     } catch (err) {
-      console.error('[WebSocket] Connection error:', err);
+      logger.error('Connection error', 'WebSocket', err);
       setError('Failed to create WebSocket connection');
       setConnectionState('error');
     }

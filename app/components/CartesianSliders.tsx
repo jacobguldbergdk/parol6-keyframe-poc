@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useInputStore, useCommandStore, useRobotConfigStore } from '@/app/lib/stores';
+import { useKinematicsStore } from '@/app/lib/stores/kinematicsStore';
 import { CARTESIAN_AXES, CARTESIAN_LIMITS } from '@/app/lib/constants';
 import { Slider } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
@@ -9,19 +10,23 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CartesianAxis, IkAxisMask } from '@/app/lib/types';
 import { inverseKinematicsDetailed } from '@/app/lib/kinematics';
-import { solveIKBackend, IKResult } from '@/app/lib/api';
-import { AlertCircle, CheckCircle, Calculator, Network, Copy } from 'lucide-react';
+import { AlertCircle, CheckCircle, Calculator, Copy, ChevronLeft, ChevronRight } from 'lucide-react';
+import { logger } from '@/app/lib/logger';
 
 export default function CartesianSliders() {
   // Input store: What user is typing/moving in sliders
   const inputCartesianPose = useInputStore((state) => state.inputCartesianPose);
   const setInputCartesianValue = useInputStore((state) => state.setInputCartesianValue);
+  const cartesianPositionStep = useInputStore((state) => state.cartesianPositionStep);
 
   // Command store: Commanded joint angles (for IK seed and result)
   const commandedJointAngles = useCommandStore((state) => state.commandedJointAngles);
   const setCommandedJointAngles = useCommandStore((state) => state.setCommandedJointAngles);
-  const targetRobotRef = useCommandStore((state) => state.targetRobotRef);
   const commandedTcpPose = useCommandStore((state) => state.commandedTcpPose);
+
+  // Kinematics store: Computation robot and tool
+  const computationRobotRef = useKinematicsStore((state) => state.computationRobotRef);
+  const computationTool = useKinematicsStore((state) => state.computationTool);
 
   // Config store: TCP offset and IK mask
   const tcpOffset = useRobotConfigStore((state) => state.tcpOffset);
@@ -35,16 +40,6 @@ export default function CartesianSliders() {
     iterations?: number;
   }>({ type: 'idle' });
 
-  const [backendIkStatus, setBackendIkStatus] = useState<{
-    type: 'idle' | 'computing' | 'success' | 'error';
-    message?: string;
-    iterations?: number;
-  }>({ type: 'idle' });
-
-  // Store results for comparison
-  const [frontendResult, setFrontendResult] = useState<IKResult | null>(null);
-  const [backendResult, setBackendResult] = useState<IKResult | null>(null);
-
   // Track input field values separately to allow editing
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
 
@@ -53,19 +48,32 @@ export default function CartesianSliders() {
   const handleSliderChange = (axis: CartesianAxis, value: number) => {
     setInputCartesianValue(axis, value);
     // Clear IK status when user changes target
-    if (ikStatus.type !== 'idle' || backendIkStatus.type !== 'idle') {
+    if (ikStatus.type !== 'idle') {
       setIkStatus({ type: 'idle' });
-      setBackendIkStatus({ type: 'idle' });
-      setFrontendResult(null);
-      setBackendResult(null);
+    }
+  };
+
+  // Handle increment/decrement buttons
+  const handleStepAxis = (axis: CartesianAxis, direction: number) => {
+    const currentValue = inputCartesianPose[axis];
+    const limits = CARTESIAN_LIMITS[axis];
+    const step = ['X', 'Y', 'Z'].includes(axis) ? cartesianPositionStep : 0.1; // Position step for X/Y/Z, 0.1° for rotations
+    const newValue = Math.max(limits.min, Math.min(limits.max, currentValue + (direction * step)));
+
+    setInputCartesianValue(axis, newValue);
+    // Clear IK status when user changes target
+    if (ikStatus.type !== 'idle') {
+      setIkStatus({ type: 'idle' });
     }
   };
 
   // Compute IK on demand using numerical solver
   const handleComputeIK = () => {
+    logger.debug('Starting IK computation...', 'IKSolve');
     setIkStatus({ type: 'computing' });
 
-    if (!targetRobotRef) {
+    if (!computationRobotRef) {
+      logger.error('FAILED: Computation robot not loaded', 'IKSolve');
       setIkStatus({
         type: 'error',
         message: 'URDF robot model not loaded yet. Please wait...'
@@ -73,92 +81,59 @@ export default function CartesianSliders() {
       return;
     }
 
+    logger.debug('Inputs', 'IKSolve', {
+      targetPose: inputCartesianPose,
+      seedJoints: commandedJointAngles,
+      tool: {
+        id: computationTool.id,
+        name: computationTool.name,
+        tcp_offset: computationTool.tcp_offset
+      },
+      ikAxisMask
+    });
+
     // Small delay to show loading state
     setTimeout(() => {
       // Target is TCP position - numerical IK handles TCP offset internally
+      logger.debug('Calling inverseKinematicsDetailed...', 'IKSolve');
       const ikResult = inverseKinematicsDetailed(
         inputCartesianPose,
         commandedJointAngles,
-        targetRobotRef,
-        tcpOffset,
+        computationRobotRef,
+        computationTool,
         ikAxisMask
       );
 
+      logger.debug('Result', 'IKSolve', ikResult);
+
       if (ikResult.success && ikResult.jointAngles) {
         // Update commanded joint angles - robot will move to match target
+        logger.debug('SUCCESS', 'IKSolve', {
+          jointAngles: ikResult.jointAngles,
+          iterations: ikResult.iterations,
+          finalError: ikResult.finalError
+        });
         setCommandedJointAngles(ikResult.jointAngles);
         setIkStatus({
           type: 'success',
           message: `Converged in ${ikResult.iterations} iterations (error: ${ikResult.finalError?.toFixed(2)}mm)`,
           iterations: ikResult.iterations
         });
-        // Store result for comparison
-        setFrontendResult({
-          success: true,
-          joints: ikResult.jointAngles,
-          iterations: ikResult.iterations,
-          source: 'frontend'
-        });
       } else {
+        logger.error('FAILED', 'IKSolve', {
+          error: ikResult.error,
+          iterations: ikResult.iterations,
+          finalError: ikResult.finalError
+        });
         setIkStatus({
           type: 'error',
           message: ikResult.error?.message || 'IK failed',
           distance: ikResult.error?.distance,
           iterations: ikResult.iterations
         });
-        setFrontendResult({
-          success: false,
-          error: ikResult.error?.message || 'IK failed',
-          iterations: ikResult.iterations,
-          source: 'frontend'
-        });
       }
     }, 50);
   };
-
-  // Compute IK using backend solver
-  const handleComputeBackendIK = async () => {
-    setBackendIkStatus({ type: 'computing' });
-
-    try {
-      const result = await solveIKBackend(
-        inputCartesianPose,
-        commandedJointAngles,
-        ikAxisMask,
-        targetRobotRef,  // Pass URDF reference for quaternion extraction
-        tcpOffset        // Pass TCP offset for consistency
-      );
-
-      setBackendResult(result);
-
-      if (result.success && result.joints) {
-        // Update commanded joint angles - robot will move to match target
-        setCommandedJointAngles(result.joints);
-        setBackendIkStatus({
-          type: 'success',
-          message: `Backend IK solved in ${result.iterations || '?'} iterations (residual: ${result.residual?.toFixed(4) || 'N/A'})`,
-          iterations: result.iterations
-        });
-      } else {
-        setBackendIkStatus({
-          type: 'error',
-          message: result.error || 'Backend IK failed',
-          iterations: result.iterations
-        });
-      }
-    } catch (error) {
-      setBackendIkStatus({
-        type: 'error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
-      setBackendResult({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        source: 'backend'
-      });
-    }
-  };
-
 
   const getUnit = (axis: CartesianAxis) => {
     return ['X', 'Y', 'Z'].includes(axis) ? 'mm' : '°';
@@ -187,11 +162,8 @@ export default function CartesianSliders() {
     // Clear input value to revert to showing inputCartesianPose
     setInputValues({ ...inputValues, [axis]: '' });
     // Clear IK status when user changes target
-    if (ikStatus.type !== 'idle' || backendIkStatus.type !== 'idle') {
+    if (ikStatus.type !== 'idle') {
       setIkStatus({ type: 'idle' });
-      setBackendIkStatus({ type: 'idle' });
-      setFrontendResult(null);
-      setBackendResult(null);
     }
   };
 
@@ -217,15 +189,12 @@ export default function CartesianSliders() {
 
     // Clear IK status since we're resetting to a known position
     setIkStatus({ type: 'idle' });
-    setBackendIkStatus({ type: 'idle' });
-    setFrontendResult(null);
-    setBackendResult(null);
   };
 
   return (
     <div className="space-y-4">
       {/* Cartesian Sliders */}
-      <div className="space-y-4">
+      <div className="space-y-2">
         {CARTESIAN_AXES.map((axis) => {
           const limits = CARTESIAN_LIMITS[axis];
           const unit = getUnit(axis);
@@ -236,9 +205,42 @@ export default function CartesianSliders() {
             : currentValue.toFixed(1);
 
           return (
-            <div key={axis} className="space-y-2">
-              <div className="flex justify-between items-center text-sm gap-2">
-                <span className="font-medium">{axis}</span>
+            <div key={axis} className="space-y-1 pb-2 border-b last:border-b-0">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-medium">{axis}</span>
+                <span className="text-xs text-muted-foreground">
+                  [{limits.min.toFixed(0)}{unit} to {limits.max.toFixed(0)}{unit}]
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleStepAxis(axis, -1)}
+                  className="h-6 w-6 p-0"
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </Button>
+                <div className="flex-1">
+                  <Slider
+                    min={limits.min}
+                    max={limits.max}
+                    step={step}
+                    value={[currentValue]}
+                    onValueChange={(values) => handleSliderChange(axis, values[0])}
+                    className="w-full"
+                    tabIndex={-1}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleStepAxis(axis, 1)}
+                  className="h-6 w-6 p-0"
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </Button>
                 <div className="flex items-center gap-1">
                   <Input
                     type="text"
@@ -246,19 +248,11 @@ export default function CartesianSliders() {
                     onChange={(e) => handleInputChange(axis, e.target.value)}
                     onBlur={() => handleInputBlur(axis)}
                     onKeyDown={(e) => handleInputKeyDown(axis, e)}
-                    className="w-16 h-7 px-2 text-xs font-mono text-right"
+                    className="w-12 h-6 px-1 text-xs font-mono text-right"
                   />
-                  <span className="text-xs text-muted-foreground">{unit}</span>
+                  <span className="text-xs text-muted-foreground w-6">{unit}</span>
                 </div>
               </div>
-              <Slider
-                min={limits.min}
-                max={limits.max}
-                step={step}
-                value={[currentValue]}
-                onValueChange={(values) => handleSliderChange(axis, values[0])}
-                className="w-full"
-              />
             </div>
           );
         })}
@@ -267,7 +261,7 @@ export default function CartesianSliders() {
       {/* IK Axis Mask Selector */}
       <div className="mt-4 pt-4 border-t">
         <div className="text-xs font-semibold mb-2 text-muted-foreground">IK Solve Axes:</div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-2">
           {(['X', 'Y', 'Z', 'RX', 'RY', 'RZ'] as const).map((axis) => (
             <label key={axis} className="flex items-center gap-2 cursor-pointer">
               <Checkbox
@@ -277,7 +271,7 @@ export default function CartesianSliders() {
                 }}
                 className="w-4 h-4"
               />
-              <span className="text-sm font-medium">
+              <span className="text-xs font-medium">
                 {axis}
               </span>
             </label>
@@ -288,25 +282,17 @@ export default function CartesianSliders() {
         </div>
       </div>
 
-      {/* Sync to Robot Button */}
-      <div className="mt-4">
+      {/* Copy TCP and Compute IK Buttons */}
+      <div className="mt-4 grid grid-cols-2 gap-2">
         <Button
           onClick={handleSyncToRobotTcp}
           disabled={!commandedTcpPose}
           className="w-full"
           variant="outline"
-          size="sm"
         >
           <Copy className="w-4 h-4 mr-2" />
-          Copy From Robot TCP
+          Copy TCP
         </Button>
-        <div className="mt-1 text-xs text-muted-foreground italic text-center">
-          Sync sliders to commanded robot's actual position
-        </div>
-      </div>
-
-      {/* Compute IK Buttons */}
-      <div className="mt-4 grid grid-cols-2 gap-2">
         <Button
           onClick={handleComputeIK}
           disabled={ikStatus.type === 'computing'}
@@ -315,15 +301,6 @@ export default function CartesianSliders() {
         >
           <Calculator className="w-4 h-4 mr-2" />
           {ikStatus.type === 'computing' ? 'Computing...' : 'IK (Frontend)'}
-        </Button>
-        <Button
-          onClick={handleComputeBackendIK}
-          disabled={backendIkStatus.type === 'computing'}
-          className="w-full"
-          variant="outline"
-        >
-          <Network className="w-4 h-4 mr-2" />
-          {backendIkStatus.type === 'computing' ? 'Computing...' : 'IK (Backend)'}
         </Button>
       </div>
 
@@ -347,84 +324,6 @@ export default function CartesianSliders() {
             {ikStatus.iterations && (
               <div className="text-red-400/70 mt-1">
                 Iterations: {ikStatus.iterations}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Backend IK Status Feedback */}
-      {backendIkStatus.type === 'success' && (
-        <div className="bg-blue-500/10 border border-blue-500/50 rounded-lg p-3 flex items-start gap-2">
-          <CheckCircle className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-          <div className="text-xs text-blue-400">
-            <div className="font-semibold mb-1">Backend IK Success!</div>
-            <div>{backendIkStatus.message}</div>
-          </div>
-        </div>
-      )}
-
-      {backendIkStatus.type === 'error' && (
-        <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
-          <div className="text-xs">
-            <div className="font-semibold text-red-500 mb-1">Backend IK Failed</div>
-            <div className="text-red-400">{backendIkStatus.message}</div>
-            {backendIkStatus.iterations && (
-              <div className="text-red-400/70 mt-1">
-                Iterations: {backendIkStatus.iterations}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Comparison View */}
-      {frontendResult && backendResult && frontendResult.success && backendResult.success && (
-        <div className="mt-4 pt-4 border-t">
-          <h4 className="text-xs font-semibold mb-3 text-muted-foreground">IK Comparison</h4>
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <div className="font-semibold text-muted-foreground">Joint</div>
-            <div className="font-semibold text-green-500 text-center">Frontend</div>
-            <div className="font-semibold text-blue-500 text-center">Backend</div>
-
-            {['J1', 'J2', 'J3', 'J4', 'J5', 'J6'].map((joint) => {
-              const frontendVal = frontendResult.joints?.[joint as keyof typeof frontendResult.joints] || 0;
-              const backendVal = backendResult.joints?.[joint as keyof typeof backendResult.joints] || 0;
-              const diff = Math.abs(frontendVal - backendVal);
-              const isSignificant = diff > 5; // More than 5 degrees difference
-
-              return (
-                <div key={joint} className="contents">
-                  <div className="text-muted-foreground">{joint}:</div>
-                  <div className="font-mono text-center">{frontendVal.toFixed(1)}°</div>
-                  <div className="font-mono text-center">{backendVal.toFixed(1)}°</div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-3 space-y-1">
-            <div className="text-xs text-muted-foreground">
-              <span className="font-semibold">Max Difference:</span>{' '}
-              {Math.max(
-                ...['J1', 'J2', 'J3', 'J4', 'J5', 'J6'].map((joint) => {
-                  const frontendVal = frontendResult.joints?.[joint as keyof typeof frontendResult.joints] || 0;
-                  const backendVal = backendResult.joints?.[joint as keyof typeof backendResult.joints] || 0;
-                  return Math.abs(frontendVal - backendVal);
-                })
-              ).toFixed(2)}°
-            </div>
-            {Math.max(
-              ...['J1', 'J2', 'J3', 'J4', 'J5', 'J6'].map((joint) => {
-                const frontendVal = frontendResult.joints?.[joint as keyof typeof frontendResult.joints] || 0;
-                const backendVal = backendResult.joints?.[joint as keyof typeof backendResult.joints] || 0;
-                return Math.abs(frontendVal - backendVal);
-              })
-            ) > 5 && (
-              <div className="text-xs text-amber-500 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                <span>Significant difference detected (>5°)</span>
               </div>
             )}
           </div>

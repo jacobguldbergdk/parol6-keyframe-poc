@@ -8,11 +8,12 @@
  */
 
 import * as THREE from 'three';
-import { JointAngles, CartesianPose, IkAxisMask } from './types';
-import { STANDBY_POSITION, ORIENTATION_CONFIG, JOINT_ANGLE_OFFSETS } from './constants';
+import { JointAngles, CartesianPose, IkAxisMask, Tool } from './types';
+import { STANDBY_POSITION, ORIENTATION_CONFIG, JOINT_ANGLE_OFFSETS, JOINT_LIMITS } from './constants';
 import { useTimelineStore } from './store';
 import { calculateTcpPoseFromUrdf } from './tcpCalculations';
 import { threeJsToRobot } from './coordinateTransform';
+import { applyJointAnglesToUrdf } from './urdfHelpers';
 
 // DH Parameters from PAROL6_ROBOT.py (converted to mm)
 const DH_PARAMS = {
@@ -27,6 +28,7 @@ const DH_PARAMS = {
   alpha: [-Math.PI / 2, Math.PI, Math.PI / 2, -Math.PI / 2, Math.PI / 2, Math.PI]
 };
 
+import { logger } from './logger';
 export interface IKResult {
   success: boolean;
   jointAngles: JointAngles | null;
@@ -57,14 +59,15 @@ export function numericalIK(
   targetPose: CartesianPose,
   currentJoints: JointAngles,
   urdfRobot: any,
-  tcpOffset: { x: number; y: number; z: number },
+  tool: Tool,
   axisMask: IkAxisMask = { X: true, Y: true, Z: true, RX: false, RY: false, RZ: false },
-  maxIterations: number = 100,
+  maxIterations: number = 30,
   tolerance: number = 1.0
 ): IKResult {
   const activeAxes = Object.entries(axisMask).filter(([_, enabled]) => enabled).map(([axis]) => axis);
 
   if (!urdfRobot) {
+    logger.error('FAILED: URDF robot not loaded', 'numericalIK');
     return {
       success: false,
       jointAngles: null,
@@ -75,14 +78,29 @@ export function numericalIK(
     };
   }
 
+  // Validate input pose for NaN values
+  const poseValues = [targetPose.X, targetPose.Y, targetPose.Z, targetPose.RX, targetPose.RY, targetPose.RZ];
+  if (poseValues.some(v => isNaN(v))) {
+    logger.error('FAILED: Input pose contains NaN', 'numericalIK', { targetPose });
+    return {
+      success: false,
+      jointAngles: null,
+      error: {
+        reason: 'invalid_input',
+        message: `Input pose contains NaN values: X=${targetPose.X}, Y=${targetPose.Y}, Z=${targetPose.Z}, RX=${targetPose.RX}, RY=${targetPose.RY}, RZ=${targetPose.RZ}`
+      }
+    };
+  }
+
   // Start from current joint configuration
   let joints = { ...currentJoints };
   const lambda = 0.1; // Damping factor for numerical stability
 
   for (let iter = 0; iter < maxIterations; iter++) {
     // Get current TCP pose using URDF FK
-    const currentTcp = getURDFTcpPose(urdfRobot, joints, tcpOffset);
+    const currentTcp = getURDFTcpPose(urdfRobot, joints, tool);
     if (!currentTcp) {
+      logger.error(`FAILED: FK computation failed at iteration ${iter}`, 'numericalIK');
       return {
         success: false,
         jointAngles: null,
@@ -119,8 +137,9 @@ export function numericalIK(
     }
 
     // Compute Jacobian
-    const jacobian = computeJacobian(urdfRobot, joints, tcpOffset);
+    const jacobian = computeJacobian(urdfRobot, joints, tool);
     if (!jacobian) {
+      logger.error(`FAILED: Jacobian computation failed at iteration ${iter}`, 'numericalIK');
       return {
         success: false,
         jointAngles: null,
@@ -138,6 +157,7 @@ export function numericalIK(
       const pseudoInv = jacobian.dampedPseudoInverse(lambda);
       deltaJoints = pseudoInv.multiply(errorVec);
     } catch (e) {
+      logger.error(`FAILED: Matrix inversion failed at iteration ${iter}`, 'numericalIK', e);
       return {
         success: false,
         jointAngles: null,
@@ -159,20 +179,14 @@ export function numericalIK(
     });
 
     // Apply joint limits from constants
-    import('./constants').then(({ JOINT_LIMITS }) => {
-      jointNames.forEach((joint) => {
-        const limits = JOINT_LIMITS[joint];
-        joints[joint] = Math.max(limits.min, Math.min(limits.max, joints[joint]));
-      });
+    jointNames.forEach((joint) => {
+      const limits = JOINT_LIMITS[joint];
+      joints[joint] = Math.max(limits.min, Math.min(limits.max, joints[joint]));
     });
-
-    // Log progress every 10 iterations
-    if ((iter + 1) % 10 === 0) {
-    }
   }
 
   // Max iterations reached
-  const finalTcp = getURDFTcpPose(urdfRobot, joints, tcpOffset);
+  const finalTcp = getURDFTcpPose(urdfRobot, joints, tool);
   const finalError = finalTcp
     ? Math.sqrt(
         (axisMask.X ? (targetPose.X - finalTcp.X) ** 2 : 0) +
@@ -191,7 +205,7 @@ export function numericalIK(
     finalError,
     error: {
       reason: 'out_of_reach',
-      message: `Failed to converge after ${maxIterations} iterations (error: ${finalError.toFixed(1)}mm)`,
+      message: `Failed to converge after ${maxIterations} iterations (error: ${isNaN(finalError) ? 'NaN' : finalError.toFixed(1)}mm)`,
       distance: finalError
     }
   };
@@ -203,16 +217,16 @@ export function numericalIK(
  *
  * @param targetPose - Target Cartesian pose (full 6-DOF)
  * @param currentJoints - Current joint configuration (for seed)
- * @param urdfRobot - URDF robot model (optional, will use from store if not provided)
- * @param tcpOffset - TCP offset (optional, will use from store if not provided)
+ * @param urdfRobot - URDF robot model (get from kinematicsStore.computationRobotRef)
+ * @param tool - Tool configuration with TCP offset
  * @param axisMask - Which axes to solve for (optional, defaults to position-only)
  * @returns IK result with success status
  */
 export function inverseKinematicsDetailed(
   targetPose: CartesianPose,
   currentJoints: JointAngles,
-  urdfRobot?: any,
-  tcpOffset?: { x: number; y: number; z: number },
+  urdfRobot: any,
+  tool: Tool,
   axisMask?: IkAxisMask
 ): IKResult {
   // Use numerical IK solver with full pose and axis mask
@@ -220,7 +234,7 @@ export function inverseKinematicsDetailed(
     targetPose,
     currentJoints,
     urdfRobot,
-    tcpOffset || { x: 47, y: 0, z: -62 },
+    tool,
     axisMask
   );
 }
@@ -444,27 +458,16 @@ class Matrix {
 function getURDFTcpPose(
   urdfRobot: any,
   jointAngles: JointAngles,
-  tcpOffset: { x: number; y: number; z: number }
+  tool: Tool
 ): CartesianPose | null {
   if (!urdfRobot) return null;
 
   try {
-    // Apply joint angle transformations (from RobotViewer)
-    const angleSigns = [1, 1, -1, -1, -1, -1];
-
-    const jointNames = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6'] as const;
-    jointNames.forEach((joint, index) => {
-      const angleDeg = jointAngles[joint];
-      const sign = angleSigns[index];
-      const offset = JOINT_ANGLE_OFFSETS[index];
-      const correctedAngleDeg = angleDeg * sign + offset;
-      const angleRad = (correctedAngleDeg * Math.PI) / 180;
-      const linkName = `L${index + 1}`;
-      urdfRobot.setJointValue(linkName, angleRad);
-    });
+    // Apply joint angles to URDF using centralized helper
+    applyJointAnglesToUrdf(urdfRobot, jointAngles);
 
     // Calculate TCP pose from URDF (returns Three.js coordinates)
-    const threeJsPose = calculateTcpPoseFromUrdf(urdfRobot, tcpOffset);
+    const threeJsPose = calculateTcpPoseFromUrdf(urdfRobot, tool.tcp_offset);
     if (!threeJsPose) return null;
 
     // Convert Three.js coordinates (Y-up) to robot coordinates (Z-up)
@@ -484,10 +487,10 @@ function getURDFTcpPose(
 function computeJacobian(
   urdfRobot: any,
   jointAngles: JointAngles,
-  tcpOffset: { x: number; y: number; z: number },
+  tool: Tool,
   delta: number = 0.01 // degrees
 ): Matrix | null {
-  const currentTcp = getURDFTcpPose(urdfRobot, jointAngles, tcpOffset);
+  const currentTcp = getURDFTcpPose(urdfRobot, jointAngles, tool);
   if (!currentTcp) return null;
 
   const jacobian = Matrix.zeros(6, 6);
@@ -498,7 +501,7 @@ function computeJacobian(
     const perturbedAngles = { ...jointAngles };
     perturbedAngles[joint] += delta;
 
-    const perturbedTcp = getURDFTcpPose(urdfRobot, perturbedAngles, tcpOffset);
+    const perturbedTcp = getURDFTcpPose(urdfRobot, perturbedAngles, tool);
     if (!perturbedTcp) return null;
 
     // Compute derivative: ∂Pose/∂Joint_i

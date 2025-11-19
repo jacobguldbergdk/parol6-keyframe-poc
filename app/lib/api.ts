@@ -5,156 +5,7 @@
 import { CartesianPose, JointAngles, IkAxisMask } from './types';
 import { getApiBaseUrl } from './apiConfig';
 import { ORIENTATION_CONFIG } from './constants';
-
-export interface IKResult {
-  success: boolean;
-  joints?: JointAngles;
-  error?: string;
-  iterations?: number;
-  residual?: number;
-  source: 'frontend' | 'backend';
-}
-
-/**
- * Call backend IK solver
- *
- * Uses the same IK implementation as the actual robot controller,
- * ensuring consistency between visualization and execution.
- */
-export async function solveIKBackend(
-  targetPose: CartesianPose,
-  currentJoints: JointAngles,
-  axisMask?: IKAxisMask,
-  targetRobotRef?: any,
-  tcpOffset?: { x: number; y: number; z: number }
-): Promise<IKResult> {
-  try {
-    // Convert CartesianPose to array format expected by backend
-    const targetPoseArray = [
-      targetPose.X,
-      targetPose.Y,
-      targetPose.Z,
-      targetPose.RX,
-      targetPose.RY,
-      targetPose.RZ
-    ];
-
-    // Convert JointAngles to array
-    const currentJointsArray = [
-      currentJoints.J1,
-      currentJoints.J2,
-      currentJoints.J3,
-      currentJoints.J4,
-      currentJoints.J5,
-      currentJoints.J6
-    ];
-
-    // Convert axis mask to array (if provided)
-    const axisMaskArray = axisMask ? [
-      axisMask.X ? 1 : 0,
-      axisMask.Y ? 1 : 0,
-      axisMask.Z ? 1 : 0,
-      axisMask.RX ? 1 : 0,
-      axisMask.RY ? 1 : 0,
-      axisMask.RZ ? 1 : 0
-    ] : undefined;
-
-    // Extract quaternion from target robot URDF (preferred over Euler angles)
-    let targetQuaternion: number[] | undefined = undefined;
-    if (targetRobotRef) {
-      try {
-        const THREE = await import('three');
-        const { ORIENTATION_CONFIG } = await import('./constants');
-
-        const l6Link = targetRobotRef.links['L6'];
-        if (l6Link) {
-          // Update world matrix to ensure transforms are current
-          l6Link.updateMatrixWorld(true);
-
-          // Get world quaternion
-          const l6WorldQuaternion = new THREE.Quaternion();
-          l6Link.getWorldQuaternion(l6WorldQuaternion);
-
-          // Apply parent rotation inverse if enabled (same as TargetTCPVisualizer)
-          let quaternionToUse = l6WorldQuaternion;
-          if (ORIENTATION_CONFIG.applyQuaternionTransform) {
-            const parentRotation = new THREE.Quaternion().setFromEuler(
-              new THREE.Euler(-Math.PI / 2, 0, 0, 'XYZ')
-            );
-            const parentRotationInverse = parentRotation.clone().invert();
-            quaternionToUse = parentRotationInverse.clone().multiply(l6WorldQuaternion);
-          }
-
-          // Extract [w, x, y, z] for backend
-          targetQuaternion = [
-            quaternionToUse.w,
-            quaternionToUse.x,
-            quaternionToUse.y,
-            quaternionToUse.z
-          ];
-        }
-      } catch (error) {
-        // Quaternion extraction failed, will use Euler angles
-      }
-    }
-
-    // Call backend API
-    const response = await fetch(`${getApiBaseUrl()}/api/ik`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        target_pose: targetPoseArray,
-        target_quaternion: targetQuaternion,  // Send quaternion if available
-        current_joints: currentJointsArray,
-        axis_mask: axisMaskArray
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Backend IK request failed: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-
-    if (data.success && data.joints) {
-      // Convert array back to JointAngles
-      const joints: JointAngles = {
-        J1: data.joints[0],
-        J2: data.joints[1],
-        J3: data.joints[2],
-        J4: data.joints[3],
-        J5: data.joints[4],
-        J6: data.joints[5]
-      };
-
-      return {
-        success: true,
-        joints,
-        error: undefined,
-        iterations: data.iterations,
-        residual: data.residual,
-        source: 'backend'
-      };
-    } else {
-      return {
-        success: false,
-        error: data.error || 'IK solution failed',
-        iterations: data.iterations,
-        source: 'backend'
-      };
-    }
-
-  } catch (error) {
-    console.error('Backend IK error:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-      source: 'backend'
-    };
-  }
-}
+import { logger } from './logger';
 
 /**
  * Check if backend API is reachable
@@ -208,7 +59,55 @@ export async function moveJoints(
     const data = await response.json();
     return { success: true };
   } catch (error) {
-    console.error('Move joints error:', error);
+    logger.error('Move joints error', 'API', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
+// ============================================================================
+// Camera API
+// ============================================================================
+
+export interface CameraDevice {
+  device: string;
+  name: string;
+}
+
+export interface CameraStatus {
+  streaming: boolean;
+  device: string | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+}
+
+/**
+ * Get list of available USB camera devices
+ */
+export async function getCameraDevices(): Promise<{
+  success: boolean;
+  devices?: CameraDevice[];
+  error?: string
+}> {
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/camera/devices`, {
+      method: 'GET'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Get camera devices failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      devices: data.devices
+    };
+  } catch (error) {
+    logger.error('Get camera devices error', 'API', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -217,36 +116,29 @@ export async function moveJoints(
 }
 
 /**
- * Move robot to pose (joint-interpolated motion, curved path)
- *
- * @param pose - Target pose in robot coordinates (Z-up)
- * @param speedPercentage - Speed as percentage (1-100)
+ * Get current camera status
  */
-export async function movePose(
-  pose: CartesianPose,
-  speedPercentage: number
-): Promise<{ success: boolean; error?: string }> {
+export async function getCameraStatus(): Promise<{
+  success: boolean;
+  status?: CameraStatus;
+  error?: string;
+}> {
   try {
-    // Pose is already in robot coordinates (Z-up) - send directly to backend
-    const poseArray = [pose.X, pose.Y, pose.Z, pose.RX, pose.RY, pose.RZ];
-
-    const response = await fetch(`${getApiBaseUrl()}/api/robot/move/pose`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pose: poseArray,
-        speed_percentage: speedPercentage
-      })
+    const response = await fetch(`${getApiBaseUrl()}/api/camera/status`, {
+      method: 'GET'
     });
 
     if (!response.ok) {
-      throw new Error(`Move pose failed: ${response.status} ${response.statusText}`);
+      throw new Error(`Get camera status failed: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    return { success: true };
+    return {
+      success: true,
+      status: data
+    };
   } catch (error) {
-    console.error('Move pose error:', error);
+    logger.error('Get camera status error', 'API', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -255,39 +147,161 @@ export async function movePose(
 }
 
 /**
- * Move robot to pose (cartesian straight-line motion)
- *
- * @param pose - Target pose in robot coordinates (Z-up)
- * @param speedPercentage - Speed as percentage (1-100)
+ * Start camera on specified device
  */
-export async function moveCartesian(
-  pose: CartesianPose,
-  speedPercentage: number
-): Promise<{ success: boolean; error?: string }> {
+export async function startCamera(
+  device: string,
+  width?: number,
+  height?: number,
+  fps?: number
+): Promise<{
+  success: boolean;
+  status?: CameraStatus;
+  error?: string;
+}> {
   try {
-    // Pose is already in robot coordinates (Z-up) - send directly to backend
-    const poseArray = [pose.X, pose.Y, pose.Z, pose.RX, pose.RY, pose.RZ];
+    const params = new URLSearchParams({ device });
+    if (width !== undefined) params.append('width', width.toString());
+    if (height !== undefined) params.append('height', height.toString());
+    if (fps !== undefined) params.append('fps', fps.toString());
 
-    const response = await fetch(`${getApiBaseUrl()}/api/robot/move/cartesian`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pose: poseArray,
-        speed_percentage: speedPercentage
-      })
+    const response = await fetch(`${getApiBaseUrl()}/api/camera/start?${params}`, {
+      method: 'POST'
     });
 
     if (!response.ok) {
-      throw new Error(`Move cartesian failed: ${response.status} ${response.statusText}`);
+      throw new Error(`Start camera failed: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    return { success: true };
+    return {
+      success: true,
+      status: data.status
+    };
   } catch (error) {
-    console.error('Move cartesian error:', error);
+    logger.error('Start camera error', 'API', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
 }
+
+/**
+ * Stop camera capture
+ */
+export async function stopCamera(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/camera/stop`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Stop camera failed: ${response.status} ${response.statusText}`);
+    }
+
+    return { success: true };
+  } catch (error) {
+    logger.error('Stop camera error', 'API', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
+/**
+ * Get camera stream URL
+ */
+export function getCameraStreamUrl(): string {
+  return `${getApiBaseUrl()}/api/camera/stream`;
+}
+
+export interface ExecuteTrajectoryRequest {
+  trajectory: number[][];  // Array of [J1-J6] in degrees
+  duration?: number;  // Optional duration for validation
+  wait_for_ack?: boolean;
+  timeout?: number;
+}
+
+export interface CommandResponse {
+  success: boolean;
+  command_id?: string;
+  message?: string;
+  status?: string;
+  details?: string;
+}
+
+/**
+ * Execute a pre-computed joint trajectory at 100Hz.
+ *
+ * This achieves 100Hz execution (same as MoveJoint) with Cartesian straight-line
+ * motion by using pre-computed joint positions (no real-time IK overhead).
+ *
+ * @param request - Trajectory execution request
+ * @returns Command response with status
+ *
+ * @example
+ * ```ts
+ * // First, solve IK for waypoints using frontend kinematics
+ * const jointTrajectory = [
+ *   [0, -45, 90, 0, 45, 0],
+ *   [5, -40, 85, 0, 40, 5],
+ *   // ... more waypoints
+ * ];
+ *
+ * // Then execute the trajectory
+ * const execResult = await executeTrajectory({
+ *   trajectory: jointTrajectory,
+ *   duration: 2.0,
+ *   wait_for_ack: true
+ * });
+ *
+ * if (execResult.success) {
+ *   logger.debug('Trajectory executing', 'API', { execResult });
+ * }
+ * ```
+ */
+export async function executeTrajectory(request: ExecuteTrajectoryRequest): Promise<CommandResponse> {
+  const startTime = performance.now();
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/api/robot/execute/trajectory`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Execute trajectory failed: ${response.status} ${errorText}`);
+    }
+
+    const data: CommandResponse = await response.json();
+    const elapsedMs = performance.now() - startTime;
+
+    logger.info(
+      `Execute trajectory ${data.success ? 'sent' : 'failed'}: ` +
+      `${request.trajectory.length} waypoints, ` +
+      `command_id=${data.command_id || 'N/A'} ` +
+      `(${elapsedMs.toFixed(0)}ms)`,
+      'api'
+    );
+
+    return data;
+  } catch (error) {
+    const elapsedMs = performance.now() - startTime;
+    logger.error(`Execute trajectory error after ${elapsedMs.toFixed(0)}ms: ${error}`, 'api');
+
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+

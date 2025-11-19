@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useCommandStore, useTimelineStore } from '../lib/stores';
 import { JointAngles } from '../lib/types';
 import { getApiBaseUrl } from '../lib/apiConfig';
+import { logger } from '../lib/logger';
 
 export function useActualFollowsTarget() {
   const liveControlEnabled = useCommandStore((state) => state.liveControlEnabled);
@@ -85,7 +86,7 @@ export function useActualFollowsTarget() {
 
         if (!response.ok) {
           const error = await response.json();
-          console.error('[Live Control] Move command failed:', error);
+          logger.error('Move command failed', 'LiveControl', error);
           return;
         }
 
@@ -95,7 +96,7 @@ export function useActualFollowsTarget() {
         lastSentAngles.current = { ...commandedJointAngles };
 
       } catch (error) {
-        console.error('[Live Control] Error sending move command:', error);
+        logger.error('Error sending move command', 'LiveControl', error);
       } finally {
         setIsSending(false);
       }

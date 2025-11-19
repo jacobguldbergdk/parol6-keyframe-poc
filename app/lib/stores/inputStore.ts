@@ -21,6 +21,8 @@ export interface InputStore {
   cartesianPositionStep: number;
   showTargetRobot: boolean;
   showHardwareRobot: boolean;  // Renamed from showActualRobot
+  showFirmwareCoordinates: boolean;
+  showPath: boolean;
 
   // Actions
   setInputJointAngle: (joint: JointName, angle: number) => void;
@@ -30,6 +32,8 @@ export interface InputStore {
   setCartesianPositionStep: (step: number) => void;
   setShowTargetRobot: (show: boolean) => void;
   setShowHardwareRobot: (show: boolean) => void;
+  setShowFirmwareCoordinates: (show: boolean) => void;
+  setShowPath: (show: boolean) => void;
 }
 
 export const useInputStore = create<InputStore>((set) => ({
@@ -49,6 +53,8 @@ export const useInputStore = create<InputStore>((set) => ({
   cartesianPositionStep: 1,
   showTargetRobot: true,
   showHardwareRobot: true,
+  showFirmwareCoordinates: false,
+  showPath: true,
 
   // Actions
   setInputJointAngle: (joint, angle) => {
@@ -75,5 +81,7 @@ export const useInputStore = create<InputStore>((set) => ({
   setStepAngle: (angle) => set({ stepAngle: angle }),
   setCartesianPositionStep: (step) => set({ cartesianPositionStep: step }),
   setShowTargetRobot: (show) => set({ showTargetRobot: show }),
-  setShowHardwareRobot: (show) => set({ showHardwareRobot: show })
+  setShowHardwareRobot: (show) => set({ showHardwareRobot: show }),
+  setShowFirmwareCoordinates: (show) => set({ showFirmwareCoordinates: show }),
+  setShowPath: (show) => set({ showPath: show })
 }));

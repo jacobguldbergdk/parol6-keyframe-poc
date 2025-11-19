@@ -10,6 +10,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
+import { logger } from '../lib/logger';
 
 interface MemoryStats {
   jsHeapSize: number;
@@ -37,7 +38,7 @@ export function MemoryMonitor() {
       const memory = (performance as any).memory;
 
       if (!memory) {
-        console.warn('performance.memory not available. Use Chrome with --enable-precise-memory-info flag');
+        logger.warn('performance.memory not available. Use Chrome with --enable-precise-memory-info flag', 'MemoryMonitor');
         return;
       }
 
@@ -60,14 +61,14 @@ export function MemoryMonitor() {
       // Log warning if memory usage is high
       const usagePercent = (memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100;
       if (usagePercent > 80) {
-        console.warn(`⚠️ HIGH MEMORY USAGE: ${usagePercent.toFixed(1)}% (${formatBytes(memory.usedJSHeapSize)} / ${formatBytes(memory.jsHeapSizeLimit)})`);
+        logger.warn(`HIGH MEMORY USAGE: ${usagePercent.toFixed(1)}% (${formatBytes(memory.usedJSHeapSize)} / ${formatBytes(memory.jsHeapSizeLimit)})`, 'MemoryMonitor');
       }
 
       // Log update rate every 10 seconds
       const now = Date.now();
       if (now - lastLogTime.current > 10000) {
         const updateRate = updateCountRef.current / 10;
-        console.log(`🔄 Component update rate: ${updateRate.toFixed(1)} updates/sec`);
+        logger.debug(`Component update rate: ${updateRate.toFixed(1)} updates/sec`, 'MemoryMonitor');
         updateCountRef.current = 0;
         lastLogTime.current = now;
       }
@@ -128,12 +129,12 @@ export function WebGLContextMonitor() {
 
     const handleContextLost = (event: Event) => {
       event.preventDefault();
-      console.error('🔴 WebGL Context Lost!');
+      logger.error('WebGL Context Lost!', 'MemoryMonitor');
       alert('WebGL context lost! The 3D view may not work correctly. Try refreshing the page.');
     };
 
     const handleContextRestored = () => {
-      console.log('🟢 WebGL Context Restored');
+      logger.debug('WebGL Context Restored', 'MemoryMonitor');
     };
 
     canvas.addEventListener('webglcontextlost', handleContextLost);

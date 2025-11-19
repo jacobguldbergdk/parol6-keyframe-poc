@@ -1,7 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { useInputStore, useCommandStore, useHardwareStore } from '@/app/lib/stores';
 import { JOINT_LIMITS, JOINT_NAMES } from '../lib/constants';
@@ -23,6 +25,33 @@ export default function CompactJointSliders() {
 
   // Step angle for increment/decrement buttons (from settings)
   const stepAngle = useInputStore((state) => state.stepAngle);
+
+  // Track input field values separately to allow editing (e.g., typing "45." or "-")
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
+
+  const handleInputChange = (joint: JointName, value: string) => {
+    setInputValues({ ...inputValues, [joint]: value });
+  };
+
+  const handleInputBlur = (joint: JointName) => {
+    const value = inputValues[joint];
+    if (value !== undefined && value !== '') {
+      const numValue = parseFloat(value);
+      if (!isNaN(numValue)) {
+        const limits = JOINT_LIMITS[joint];
+        const clampedValue = Math.max(limits.min, Math.min(limits.max, numValue));
+        setInputJointAngle(joint, clampedValue);
+        setCommandedJointAngle(joint, clampedValue);
+      }
+    }
+    setInputValues({ ...inputValues, [joint]: '' });
+  };
+
+  const handleInputKeyDown = (joint: JointName, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      (e.target as HTMLInputElement).blur();
+    }
+  };
 
   const handleStepJoint = (joint: JointName, direction: number) => {
     const currentValue = inputJointAngles[joint];
@@ -65,6 +94,10 @@ export default function CompactJointSliders() {
           } else if (error > 5) {
             errorColor = 'text-red-500';
           }
+
+          const displayValue = inputValues[joint] !== undefined && inputValues[joint] !== ''
+            ? inputValues[joint]
+            : inputValue.toFixed(1);
 
           return (
             <div key={joint} className="space-y-1 pb-2 border-b last:border-b-0">
@@ -113,9 +146,18 @@ export default function CompactJointSliders() {
                 >
                   <ChevronRight className="h-3 w-3" />
                 </Button>
-                <span className={`text-xs font-mono w-12 text-right ${teachModeEnabled ? 'opacity-50' : ''}`}>
-                  {inputValue.toFixed(1)}°
-                </span>
+                <div className="flex items-center gap-1">
+                  <Input
+                    type="text"
+                    value={displayValue}
+                    onChange={(e) => handleInputChange(joint, e.target.value)}
+                    onBlur={() => handleInputBlur(joint)}
+                    onKeyDown={(e) => handleInputKeyDown(joint, e)}
+                    disabled={teachModeEnabled}
+                    className={`w-12 h-6 px-1 text-xs font-mono text-right ${teachModeEnabled ? 'opacity-50' : ''}`}
+                  />
+                  <span className="text-xs text-muted-foreground">°</span>
+                </div>
               </div>
             </div>
           );
